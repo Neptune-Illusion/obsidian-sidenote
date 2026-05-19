@@ -1,0 +1,9 @@
+# User data
+data.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
