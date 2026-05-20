@@ -1027,6 +1027,7 @@ var k = class {
       if (!i || !this.isReadingViewElement(i) || !e) return;
       let n = this.commentManager.getCommentsForFile(e);
       this.clearReadingAnchors(i);
+      i.querySelectorAll(".sidenote-reading-note").forEach((s) => s.remove());
       i.querySelector(".sidenote-reading-layer")?.remove();
       if (!n.length) return;
       i.addClass("sidenote-reading-root");
@@ -1046,6 +1047,12 @@ var k = class {
           cls: "sidenote-reading-note",
           attr: { "data-comment-timestamp": `${g.timestamp}` },
         });
+        if (g.color) w.style.setProperty("--sidenote-reading-accent", g.color);
+        else
+          w.style.setProperty(
+            "--sidenote-reading-accent",
+            this.settings.highlightColor || "#FFC800",
+          );
         w.createDiv({ cls: "sidenote-reading-note-line" });
         let p = w.createDiv({ cls: "sidenote-reading-note-body markdown-rendered" });
         (await this.renderCommentContent(g.comment || "", p, e),
@@ -1135,58 +1142,95 @@ var k = class {
       }
       c.length && this.layoutReadingSidenotes(n, a, c);
     }
+    getReadingContentRect(t, e, i) {
+      let n = t.getBoundingClientRect(),
+        s = i
+          .map(({ anchor: a }) =>
+            a.closest(
+              "p, li, blockquote, h1, h2, h3, h4, h5, h6, table, pre, div",
+            ),
+          )
+          .filter(Boolean)
+          .map((a) => a.getBoundingClientRect())
+          .filter((a) => a.width > 0 && a.height > 0);
+      if (s.length) {
+        let a = Math.min(...s.map((r) => r.left)),
+          r = Math.max(...s.map((c) => c.right));
+        return { left: a, right: r, width: r - a };
+      }
+      let a = e.getBoundingClientRect();
+      return a.width > 0
+        ? { left: a.left, right: a.right, width: a.width }
+        : { left: n.left, right: n.right, width: n.width };
+    }
     layoutReadingSidenotes(t, e, i, n) {
       let s = t.getBoundingClientRect(),
-        a = e.getBoundingClientRect(),
+        a = this.getReadingContentRect(t, e, n),
         r = 12,
         c = 8,
         d = s.width || t.clientWidth || window.innerWidth || 0,
         m = a.width || e.clientWidth || Math.min(700, d),
-        h = d < 520;
-      if (h) {
-        n.forEach(({ note: f }) => {
-          (f.removeClass("sidenote-reading-note-left"),
-            f.removeClass("sidenote-reading-note-right"),
-            f.addClass("sidenote-reading-note-inline"),
-            (f.style.top = ""),
-            (f.style.left = ""),
-            (f.style.right = ""));
+        h = d < 520,
+        g = a.left || s.left + Math.max(0, d - m) / 2,
+        f = a.width || Math.min(m, d),
+        w = g - s.left,
+        p = s.left + d - (g + f),
+        b = Math.min(260, Math.max(140, Math.min(w, p) - r * 2)),
+        C = w >= 140 + r * 2,
+        P = p >= 140 + r * 2;
+      if (h || (!C && !P)) {
+        n.forEach(({ anchor: F, note: G }) => {
+          let J = F.closest(
+            "p, li, blockquote, h1, h2, h3, h4, h5, h6, table, pre, div",
+          );
+          J && J.parentElement && J.parentElement.insertBefore(G, J.nextSibling);
+          (G.removeClass("sidenote-reading-note-left"),
+            G.removeClass("sidenote-reading-note-right"),
+            G.addClass("sidenote-reading-note-inline"),
+            (G.style.top = ""),
+            (G.style.left = ""),
+            (G.style.right = ""),
+            (G.style.width = ""));
         });
         return;
       }
-      let g = (a.left && a.width ? a.left + a.width / 2 : s.left + d / 2),
-        f = Math.min(260, Math.max(140, Math.floor((d - Math.min(m, d)) / 2) - r * 2 || 180)),
-        w = [],
-        p = [];
-      n.forEach((b) => {
-        let C = b.anchor.getBoundingClientRect(),
-          P = C.left + C.width / 2,
-          F = Math.max(0, C.top - s.top + t.scrollTop);
-        (b.note.removeClass("sidenote-reading-note-inline"),
-          (b.note.style.width = `${f}px`),
-          P < g
-            ? (b.note.addClass("sidenote-reading-note-left"),
-              b.note.removeClass("sidenote-reading-note-right"),
-              (b.note.style.left = `${r}px`),
-              (b.note.style.right = ""),
-              w.push({ ...b, top: F }))
-            : (b.note.addClass("sidenote-reading-note-right"),
-              b.note.removeClass("sidenote-reading-note-left"),
-              (b.note.style.left = `${Math.max(r, s.width - f - r)}px`),
-              (b.note.style.right = ""),
-              p.push({ ...b, top: F })));
+      let F = (a.left && a.width ? a.left + a.width / 2 : s.left + d / 2),
+        G = Math.max(140, b || 180),
+        J = [],
+        K = [];
+      n.forEach((Q) => {
+        let z = Q.anchor.getBoundingClientRect(),
+          Y = z.left + z.width / 2,
+          Z = Math.max(0, z.top - s.top + t.scrollTop),
+          tt = Y < F ? "left" : "right";
+        (!C && tt === "left" && P && (tt = "right"),
+          !P && tt === "right" && C && (tt = "left"),
+          i.appendChild(Q.note),
+          Q.note.removeClass("sidenote-reading-note-inline"),
+          (Q.note.style.width = `${G}px`),
+          tt === "left"
+            ? (Q.note.addClass("sidenote-reading-note-left"),
+              Q.note.removeClass("sidenote-reading-note-right"),
+              (Q.note.style.left = `${Math.max(r, w - G - r)}px`),
+              (Q.note.style.right = ""),
+              J.push({ ...Q, top: Z }))
+            : (Q.note.addClass("sidenote-reading-note-right"),
+              Q.note.removeClass("sidenote-reading-note-left"),
+              (Q.note.style.left = `${Math.min(d - G - r, w + f + r)}px`),
+              (Q.note.style.right = ""),
+              K.push({ ...Q, top: Z })));
       });
-      let b = (C) => {
-        C.sort((P, F) => P.top - F.top);
-        let P = -1 / 0;
-        C.forEach((F) => {
-          let G = Math.max(F.top, P + c);
-          ((F.note.style.top = `${G}px`),
-            (P = G + F.note.offsetHeight));
+      let Q = (z) => {
+        z.sort((Y, Z) => Y.top - Z.top);
+        let Y = -1 / 0;
+        z.forEach((Z) => {
+          let tt = Math.max(Z.top, Y + c);
+          ((Z.note.style.top = `${tt}px`),
+            (Y = tt + Z.note.offsetHeight));
         });
       };
-      b(w);
-      b(p);
+      Q(J);
+      Q(K);
     }
     scheduleReadingViewLayout() {
       (this.readingLayoutRaf && cancelAnimationFrame(this.readingLayoutRaf),

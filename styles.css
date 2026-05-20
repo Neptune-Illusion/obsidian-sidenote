@@ -621,17 +621,17 @@
 }
 
 .markdown-preview-view .sidenote-reading-note-left {
-    left: 12px;
+    left: auto;
 }
 
 .markdown-preview-view .sidenote-reading-note-right {
-    right: 12px;
+    right: auto;
 }
 
 .markdown-preview-view .sidenote-reading-note-line {
     height: 3px;
-    background: var(--interactive-accent);
-    opacity: 0.7;
+    background: var(--sidenote-reading-accent, var(--interactive-accent));
+    opacity: 0.9;
 }
 
 .markdown-preview-view .sidenote-reading-note-body {
