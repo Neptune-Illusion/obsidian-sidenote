@@ -592,3 +592,72 @@
     border: none;
     border-radius: 50%;
 }
+
+/* ==========================================================================
+   8. Reading View Margin Notes
+   ========================================================================== */
+.markdown-preview-view .sidenote-reading-root {
+    position: relative;
+}
+
+.markdown-preview-view .sidenote-reading-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 8;
+}
+
+.markdown-preview-view .sidenote-reading-note {
+    position: absolute;
+    width: min(260px, 22vw);
+    max-width: 300px;
+    pointer-events: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-primary);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+
+.markdown-preview-view .sidenote-reading-note-left {
+    right: calc(100% + 16px);
+}
+
+.markdown-preview-view .sidenote-reading-note-right {
+    left: calc(100% + 16px);
+}
+
+.markdown-preview-view .sidenote-reading-note-line {
+    height: 3px;
+    background: var(--interactive-accent);
+    opacity: 0.7;
+}
+
+.markdown-preview-view .sidenote-reading-note-body {
+    padding: 8px 10px;
+    font-size: 0.9em;
+    line-height: 1.45;
+    max-height: 260px;
+    overflow: auto;
+}
+
+.markdown-preview-view .sidenote-reading-active {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: 2px;
+}
+
+.markdown-preview-view .sidenote-reading-note-inline {
+    position: static;
+    width: auto;
+    max-width: none;
+    margin: 8px 0;
+}
+
+@media (max-width: 1100px) {
+    .markdown-preview-view .sidenote-reading-layer {
+        position: static;
+        inset: auto;
+        display: block;
+        pointer-events: auto;
+    }
+}
