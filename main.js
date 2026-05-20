@@ -1175,50 +1175,39 @@ var k = class {
         f = a.width || Math.min(m, d),
         w = g - s.left,
         p = s.left + d - (g + f),
-        b = Math.min(260, Math.max(140, Math.min(w, p) - r * 2)),
-        C = w >= 140 + r * 2,
-        P = p >= 140 + r * 2;
-      if (h || (!C && !P)) {
-        n.forEach(({ anchor: F, note: G }) => {
-          let J = F.closest(
-            "p, li, blockquote, h1, h2, h3, h4, h5, h6, table, pre, div",
-          );
-          J && J.parentElement && J.parentElement.insertBefore(G, J.nextSibling);
-          (G.removeClass("sidenote-reading-note-left"),
-            G.removeClass("sidenote-reading-note-right"),
-            G.addClass("sidenote-reading-note-inline"),
-            (G.style.top = ""),
-            (G.style.left = ""),
-            (G.style.right = ""),
-            (G.style.width = ""));
-        });
-        return;
-      }
+        b = 88,
+        C = w >= b + r * 2,
+        P = p >= b + r * 2;
       let F = (a.left && a.width ? a.left + a.width / 2 : s.left + d / 2),
-        G = Math.max(140, b || 180),
         J = [],
         K = [];
       n.forEach((Q) => {
         let z = Q.anchor.getBoundingClientRect(),
           Y = z.left + z.width / 2,
           Z = Math.max(0, z.top - s.top + t.scrollTop),
-          tt = Y < F ? "left" : "right";
-        (!C && tt === "left" && P && (tt = "right"),
-          !P && tt === "right" && C && (tt = "left"),
+          tt = Y < F ? "left" : "right",
+          et = Math.min(260, Math.max(b, (tt === "left" ? w : p) - r * 2));
+        (!C && tt === "left" && P && ((tt = "right"), (et = Math.min(260, Math.max(b, p - r * 2)))),
+          !P && tt === "right" && C && ((tt = "left"), (et = Math.min(260, Math.max(b, w - r * 2)))),
           i.appendChild(Q.note),
           Q.note.removeClass("sidenote-reading-note-inline"),
-          (Q.note.style.width = `${G}px`),
-          tt === "left"
+          (Q.note.style.display = C || P ? "" : "none"),
+          (Q.note.style.width = `${et}px`),
+          tt === "left" && C
             ? (Q.note.addClass("sidenote-reading-note-left"),
               Q.note.removeClass("sidenote-reading-note-right"),
-              (Q.note.style.left = `${Math.max(r, w - G - r)}px`),
+              (Q.note.style.left = `${Math.max(r, w - et - r)}px`),
               (Q.note.style.right = ""),
               J.push({ ...Q, top: Z }))
-            : (Q.note.addClass("sidenote-reading-note-right"),
+            : tt === "right" && P
+              ? (Q.note.addClass("sidenote-reading-note-right"),
               Q.note.removeClass("sidenote-reading-note-left"),
-              (Q.note.style.left = `${Math.min(d - G - r, w + f + r)}px`),
+                (Q.note.style.left = `${Math.min(d - et - r, w + f + r)}px`),
               (Q.note.style.right = ""),
-              K.push({ ...Q, top: Z })));
+                K.push({ ...Q, top: Z }))
+              : (Q.note.removeClass("sidenote-reading-note-left"),
+                Q.note.removeClass("sidenote-reading-note-right"),
+                (Q.note.style.display = "none")));
       });
       let Q = (z) => {
         z.sort((Y, Z) => Y.top - Z.top);

@@ -648,17 +648,5 @@
 }
 
 .markdown-preview-view .sidenote-reading-note-inline {
-    position: static;
-    width: auto;
-    max-width: none;
-    margin: 8px 0;
-}
-
-@media (max-width: 1100px) {
-    .markdown-preview-view .sidenote-reading-layer {
-        position: static;
-        inset: auto;
-        display: block;
-        pointer-events: auto;
-    }
+    display: none;
 }
