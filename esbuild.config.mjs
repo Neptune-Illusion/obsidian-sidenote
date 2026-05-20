@@ -10,14 +10,12 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === "production");
-const entryPoint = process.env.ENTRY_POINT || "main.ts";
-const outfile = process.env.OUTFILE || "main.js";
 
 const context = await esbuild.context({
 	banner: {
 		js: banner,
 	},
-	entryPoints: [entryPoint],
+	entryPoints: ["main.ts"],
 	bundle: true,
 	external: [
 		"obsidian",
@@ -39,7 +37,7 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
-	outfile,
+	outfile: "main.js",
 	minify: prod,
 });
 

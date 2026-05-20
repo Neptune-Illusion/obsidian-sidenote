@@ -1,9 +1,9 @@
 {
 	"id": "Side Comments",
 	"name": "Side Comments",
-	"version": "1.10.5",
-	"minAppVersion": "0.15.0",
-	"description": "Add comment on the part of sentence and refer in comment view.",
-	"author": "peyote",
+	"version": "1.10.6",
+	"minAppVersion": "1.8.10",
+	"description": "Side note comments with integrated Sidebar Highlights features.",
+	"author": "peyote, trevware",
 	"isDesktopOnly": false
 }
