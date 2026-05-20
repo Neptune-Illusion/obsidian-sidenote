@@ -605,6 +605,7 @@
     inset: 0;
     pointer-events: none;
     z-index: 8;
+    overflow: visible;
 }
 
 .markdown-preview-view .sidenote-reading-note {
@@ -620,11 +621,11 @@
 }
 
 .markdown-preview-view .sidenote-reading-note-left {
-    right: calc(100% + 16px);
+    left: 12px;
 }
 
 .markdown-preview-view .sidenote-reading-note-right {
-    left: calc(100% + 16px);
+    right: 12px;
 }
 
 .markdown-preview-view .sidenote-reading-note-line {

@@ -890,6 +890,7 @@ var k = class {
       this.comments = [];
       this.imageHashes = {};
       this.readingLayoutRaf = null;
+      this.readingRenderRaf = null;
     }
     async renderCommentContent(t, e, i) {
       var r;
@@ -966,7 +967,7 @@ var k = class {
       this.app.workspace.getLeavesOfType("sidenote-view").forEach((t) => {
         t.view instanceof v && t.view.renderComments();
       });
-      this.scheduleReadingViewLayout();
+      this.queueReadingViewRender();
     }
     isReadingViewElement(t) {
       return !!t.closest(".markdown-reading-view, .markdown-preview-view");
@@ -982,6 +983,7 @@ var k = class {
             return c &&
               !c.closest(".sidenote-reading-layer") &&
               !c.closest(".sidenote-reading-note") &&
+              !c.closest(".sidenote-highlight") &&
               !c.closest("code, pre")
               ? NodeFilter.FILTER_ACCEPT
               : NodeFilter.FILTER_REJECT;
@@ -1010,7 +1012,84 @@ var k = class {
       }
       return null;
     }
+    clearReadingAnchors(t) {
+      t.querySelectorAll(".sidenote-highlight[data-comment-timestamp]").forEach(
+        (e) => {
+          e.replaceWith(document.createTextNode(e.textContent || ""));
+        },
+      );
+      t.normalize();
+    }
     async renderReadingSidenotes(t, e) {
+      let i = t.matches(".markdown-preview-view")
+        ? t
+        : t.closest(".markdown-preview-view");
+      if (!i || !this.isReadingViewElement(i) || !e) return;
+      let n = this.commentManager.getCommentsForFile(e);
+      this.clearReadingAnchors(i);
+      i.querySelector(".sidenote-reading-layer")?.remove();
+      if (!n.length) return;
+      i.addClass("sidenote-reading-root");
+      let s = i.querySelector(".markdown-preview-sizer") || i,
+        a = i.createDiv({ cls: "sidenote-reading-layer" });
+      a.empty();
+      let r = [...n].sort((g, f) =>
+          g.startLine === f.startLine
+            ? g.startChar - f.startChar
+            : g.startLine - f.startLine,
+        ),
+        c = [];
+      for (let g of r) {
+        let f = this.createCommentAnchor(s, g);
+        if (!f) continue;
+        let w = a.createDiv({
+          cls: "sidenote-reading-note",
+          attr: { "data-comment-timestamp": `${g.timestamp}` },
+        });
+        w.createDiv({ cls: "sidenote-reading-note-line" });
+        let p = w.createDiv({ cls: "sidenote-reading-note-body markdown-rendered" });
+        (await this.renderCommentContent(g.comment || "", p, e),
+          f.addEventListener("click", () => {
+            a
+              .querySelectorAll(".sidenote-reading-note")
+              .forEach((C) => C.removeClass("sidenote-reading-active"));
+            i
+              .querySelectorAll(".sidenote-highlight")
+              .forEach((C) => C.removeClass("sidenote-reading-active"));
+            (w.addClass("sidenote-reading-active"),
+              f.addClass("sidenote-reading-active"),
+              w.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+          }),
+          w.addEventListener("click", () => {
+            a
+              .querySelectorAll(".sidenote-reading-note")
+              .forEach((C) => C.removeClass("sidenote-reading-active"));
+            i
+              .querySelectorAll(".sidenote-highlight")
+              .forEach((C) => C.removeClass("sidenote-reading-active"));
+            (w.addClass("sidenote-reading-active"),
+              f.addClass("sidenote-reading-active"),
+              f.scrollIntoView({ behavior: "smooth", block: "center" }));
+          }),
+          c.push({ anchor: f, note: w }));
+      }
+      c.length ? this.layoutReadingSidenotes(i, s, a, c) : a.remove();
+    }
+    async renderReadingSidenotesForVisibleViews(t) {
+      let e = t || this.app.workspace.getActiveFile()?.path;
+      if (!e) return;
+      let i = Array.from(document.querySelectorAll(".markdown-preview-view"));
+      for (let n of i) await this.renderReadingSidenotes(n, e);
+    }
+    queueReadingViewRender(t) {
+      (this.readingRenderRaf && cancelAnimationFrame(this.readingRenderRaf),
+        (this.readingRenderRaf = requestAnimationFrame(async () => {
+          ((this.readingRenderRaf = null),
+            await this.renderReadingSidenotesForVisibleViews(t),
+            this.scheduleReadingViewLayout());
+        })));
+    }
+    async renderReadingSidenotesLegacy(t, e) {
       if (!this.isReadingViewElement(t) || !e) return;
       let i = this.commentManager.getCommentsForFile(e);
       if (!i.length) return;
@@ -1056,50 +1135,58 @@ var k = class {
       }
       c.length && this.layoutReadingSidenotes(n, a, c);
     }
-    layoutReadingSidenotes(t, e, i) {
-      let n = t.getBoundingClientRect(),
-        s = n.width < 1100;
-      if (s) {
-        i.forEach(({ note: m }) => {
-          (m.removeClass("sidenote-reading-note-left"),
-            m.removeClass("sidenote-reading-note-right"),
-            m.addClass("sidenote-reading-note-inline"),
-            (m.style.top = ""),
-            (m.style.left = ""),
-            (m.style.right = ""));
+    layoutReadingSidenotes(t, e, i, n) {
+      let s = t.getBoundingClientRect(),
+        a = e.getBoundingClientRect(),
+        r = 12,
+        c = 8,
+        d = s.width || t.clientWidth || window.innerWidth || 0,
+        m = a.width || e.clientWidth || Math.min(700, d),
+        h = d < 520;
+      if (h) {
+        n.forEach(({ note: f }) => {
+          (f.removeClass("sidenote-reading-note-left"),
+            f.removeClass("sidenote-reading-note-right"),
+            f.addClass("sidenote-reading-note-inline"),
+            (f.style.top = ""),
+            (f.style.left = ""),
+            (f.style.right = ""));
         });
         return;
       }
-      let a = n.left + n.width / 2,
-        r = [],
-        c = [];
-      i.forEach((m) => {
-        let h = m.anchor.getBoundingClientRect(),
-          g = h.left + h.width / 2,
-          f = h.top - n.top + t.scrollTop;
-        (m.note.removeClass("sidenote-reading-note-inline"),
-          g < a
-            ? (m.note.addClass("sidenote-reading-note-left"),
-              m.note.removeClass("sidenote-reading-note-right"),
-              r.push({ ...m, top: f }))
-            : (m.note.addClass("sidenote-reading-note-right"),
-              m.note.removeClass("sidenote-reading-note-left"),
-              c.push({ ...m, top: f })));
+      let g = (a.left && a.width ? a.left + a.width / 2 : s.left + d / 2),
+        f = Math.min(260, Math.max(140, Math.floor((d - Math.min(m, d)) / 2) - r * 2 || 180)),
+        w = [],
+        p = [];
+      n.forEach((b) => {
+        let C = b.anchor.getBoundingClientRect(),
+          P = C.left + C.width / 2,
+          F = Math.max(0, C.top - s.top + t.scrollTop);
+        (b.note.removeClass("sidenote-reading-note-inline"),
+          (b.note.style.width = `${f}px`),
+          P < g
+            ? (b.note.addClass("sidenote-reading-note-left"),
+              b.note.removeClass("sidenote-reading-note-right"),
+              (b.note.style.left = `${r}px`),
+              (b.note.style.right = ""),
+              w.push({ ...b, top: F }))
+            : (b.note.addClass("sidenote-reading-note-right"),
+              b.note.removeClass("sidenote-reading-note-left"),
+              (b.note.style.left = `${Math.max(r, s.width - f - r)}px`),
+              (b.note.style.right = ""),
+              p.push({ ...b, top: F })));
       });
-      let d = (m) => {
-        m.sort((h, g) => h.top - g.top);
-        let h = -1 / 0,
-          g = 8;
-        m.forEach((f) => {
-          let w = Math.max(f.top, h + g);
-          ((f.note.style.top = `${w}px`),
-            (h = w + f.note.offsetHeight),
-            (f.note.style.left = ""),
-            (f.note.style.right = ""));
+      let b = (C) => {
+        C.sort((P, F) => P.top - F.top);
+        let P = -1 / 0;
+        C.forEach((F) => {
+          let G = Math.max(F.top, P + c);
+          ((F.note.style.top = `${G}px`),
+            (P = G + F.note.offsetHeight));
         });
       };
-      d(r);
-      d(c);
+      b(w);
+      b(p);
     }
     scheduleReadingViewLayout() {
       (this.readingLayoutRaf && cancelAnimationFrame(this.readingLayoutRaf),
@@ -1111,6 +1198,7 @@ var k = class {
           t.forEach((e) => {
             let i = e.querySelector(".sidenote-reading-layer");
             if (!i) return;
+            let o = e.querySelector(".markdown-preview-sizer") || e;
             let n = Array.from(i.querySelectorAll(".sidenote-reading-note"))
               .map((s) => {
                 let a = s.getAttribute("data-comment-timestamp");
@@ -1121,7 +1209,7 @@ var k = class {
                 return r ? { anchor: r, note: s } : null;
               })
               .filter(Boolean);
-            n.length && this.layoutReadingSidenotes(e, i, n);
+            n.length && this.layoutReadingSidenotes(e, o, i, n);
           });
         })));
     }
@@ -1244,8 +1332,8 @@ ${r}`;
           this.createSelectionToolbarPlugin(),
           ...this.createHighlightPlugin(),
         ]),
-        this.registerMarkdownPostProcessor(async (t, e) => {
-          await this.renderReadingSidenotes(t, e.sourcePath);
+        this.registerMarkdownPostProcessor((t, e) => {
+          this.queueReadingViewRender(e.sourcePath);
         }),
         this.addSettingTab(new D(this.app, this)),
         this.registerView("sidenote-view", (t) => new v(t, this)),
@@ -1325,7 +1413,8 @@ ${r}`;
                 .forEach((i) => {
                   i.view instanceof v && i.view.updateActiveFile(e);
                 }),
-                this.refreshEditorDecorations());
+                this.refreshEditorDecorations(),
+                this.queueReadingViewRender(e == null ? void 0 : e.path));
             }
           }),
         ),
