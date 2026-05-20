@@ -472,6 +472,15 @@
 .sidenote-floating-footer { display: flex; justify-content: flex-end; }
 .sidenote-floating-cancel-btn { background: transparent; }
 
+.sidenote-toolbar-btn {
+    width: 44px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
 @media (max-width: 768px) {
     .sidenote-comment-modal .modal-content {
         min-height: 100%;
