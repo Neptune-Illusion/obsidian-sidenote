@@ -309,7 +309,7 @@ export default class HighlightCommentsPlugin extends Plugin {
         this.addCommand({
             id: 'add-comment-to-selection',
             name: 'Add comment to selection (Highlight)',
-            icon: 'message-square',
+            icon: 'pencil-line',
             editorCallback: (editor, view) => {
                 const markdownView = view instanceof MarkdownView ? view : this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (markdownView) this.openFloatingCommentForSelection(editor, markdownView, 'highlight');
@@ -320,7 +320,7 @@ export default class HighlightCommentsPlugin extends Plugin {
         this.addCommand({
             id: 'add-underline-comment-to-selection',
             name: 'Add comment to selection (Underline)',
-            icon: 'message-square',
+            icon: 'pencil-line',
             editorCallback: (editor, view) => {
                 const markdownView = view instanceof MarkdownView ? view : this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (markdownView) this.openFloatingCommentForSelection(editor, markdownView, 'underline');
@@ -331,7 +331,7 @@ export default class HighlightCommentsPlugin extends Plugin {
         this.addCommand({
             id: 'add-strikethrough-comment-to-selection',
             name: 'Add comment to selection (Strikethrough)',
-            icon: 'message-square',
+            icon: 'pencil-line',
             editorCallback: (editor, view) => {
                 const markdownView = view instanceof MarkdownView ? view : this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (markdownView) this.openFloatingCommentForSelection(editor, markdownView, 'strikethrough');
@@ -342,7 +342,7 @@ export default class HighlightCommentsPlugin extends Plugin {
         this.addCommand({
             id: 'add-bold-comment-to-selection',
             name: 'Add comment to selection (Bold)',
-            icon: 'message-square',
+            icon: 'pencil-line',
             editorCallback: (editor, view) => {
                 const markdownView = view instanceof MarkdownView ? view : this.app.workspace.getActiveViewOfType(MarkdownView);
                 if (markdownView) this.openFloatingCommentForSelection(editor, markdownView, 'bold');

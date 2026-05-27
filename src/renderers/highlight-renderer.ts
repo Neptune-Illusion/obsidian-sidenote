@@ -238,7 +238,7 @@ export class HighlightRenderer {
         
         const commentContainer = this.createInfoItem(
             statsSection, 
-            'message-square', 
+            'pencil-line', 
             `${validFootnoteCount}`, 
             commentStatClass
         );
@@ -274,7 +274,7 @@ export class HighlightRenderer {
     private createInfoItem(container: HTMLElement, iconName: string, text: string, className: string): HTMLElement {
         const itemContainer = container.createDiv({ cls: className });
 
-        const icon = itemContainer.createDiv({ cls: iconName === 'message-square' ? 'comment-icon' : 'line-icon' });
+        const icon = itemContainer.createDiv({ cls: iconName === 'pencil-line' ? 'comment-icon' : 'line-icon' });
         setIcon(icon, iconName);
 
         itemContainer.createSpan({ text });

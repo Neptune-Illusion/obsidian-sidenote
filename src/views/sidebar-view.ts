@@ -116,7 +116,7 @@ export class HighlightsSidebarView extends ItemView {
 
     getViewType() { return VIEW_TYPE_HIGHLIGHTS; }
     getDisplayText() { return 'Side Note'; }
-    getIcon() { return 'message-square'; }
+    getIcon() { return 'pencil-line'; }
 
     /**
      * Get default settings for a specific tab
@@ -4475,7 +4475,7 @@ export class HighlightsSidebarView extends ItemView {
         menu.addItem((item) => {
             item
                 .setTitle(t('contextMenu.removeComments'))
-                .setIcon('message-square-off')
+                .setIcon('pencil-off')
                 .setDisabled(!hasComments)
                 .onClick(async () => {
                     const ok = await this.plugin.removeHighlightFromSource(highlight, 'remove-comments');
