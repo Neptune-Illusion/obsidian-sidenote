@@ -51,6 +51,4 @@ Right-click selected text to add comments with different mark types.
 | Comments folder | Folder for Markdown backup files |
 | Attachments folder | Folder for pasted images |
 
-## Credits
 
-Originally developed by [peyote](https://github.com/peyote).
