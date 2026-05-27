@@ -270,7 +270,7 @@ export default class HighlightCommentsPlugin extends Plugin {
             }
         );
 
-        this.ribbonIconEl = this.addRibbonIcon('message-square', 'Side Note: Open in Sidebar', () => {
+        this.ribbonIconEl = this.addRibbonIcon('pencil-line', 'Side Note: Open in Sidebar', () => {
             this.activateView();
         });
 
