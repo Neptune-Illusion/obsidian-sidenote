@@ -1141,46 +1141,87 @@ export default class HighlightCommentsPlugin extends Plugin {
         const fromCursor = editor.getCursor('from');
         const syntax = this.getSidenoteMarkSyntax(markType);
         const trimmedComment = comment.trim();
-        const wrapped = `${syntax.prefix}${selectedText}${syntax.suffix}${this.settings.useInlineFootnotes && trimmedComment ? `^[${trimmedComment}]` : ''}`;
-        editor.replaceSelection(wrapped);
+        const useInline = this.settings.useInlineFootnotes && !!trimmedComment;
+        const inlineSuffix = useInline ? `^[${trimmedComment}]` : '';
+        const wrapped = `${syntax.prefix}${selectedText}${syntax.suffix}${inlineSuffix}`;
 
-        if (!this.settings.useInlineFootnotes && trimmedComment) {
-            // Generate unique footnote key
-            const currentContent = editor.getValue();
-            const usedKeys = new Set<string>();
-            const footnoteKeyRegex = /\[\^([a-zA-Z0-9_]+)\]/g;
-            let keyMatch;
-            while ((keyMatch = footnoteKeyRegex.exec(currentContent)) !== null) {
-                usedKeys.add(keyMatch[1]);
+        // Approximate offset of the original selection so we can re-locate it in the
+        // file content. The editor may be blurred (the comment input steals focus),
+        // which means edits via replaceSelection/replaceRange are silently dropped
+        // inside Live Preview table-cell widgets. Editing the file through
+        // vault.process() bypasses the editor widgets entirely and works the same in
+        // paragraphs and table cells regardless of focus.
+        const approxOffset = editor.posToOffset(fromCursor);
+
+        await this.app.vault.process(file, (data) => {
+            // Locate the occurrence of the selected text nearest the original cursor.
+            const matches: number[] = [];
+            let searchFrom = 0;
+            while (searchFrom <= data.length) {
+                const found = data.indexOf(selectedText, searchFrom);
+                if (found < 0) break;
+                matches.push(found);
+                searchFrom = found + 1;
             }
-            let keyIndex = 1;
-            while (usedKeys.has(`sn${keyIndex}`)) {
-                keyIndex++;
+            if (matches.length === 0) return data;
+            matches.sort((a, b) => Math.abs(a - approxOffset) - Math.abs(b - approxOffset));
+            const start = matches[0];
+            const end = start + selectedText.length;
+
+            // Skip if this exact text is already wrapped with the same mark syntax
+            // (avoid double-wrapping when the selection already includes the markers).
+            const before = data.slice(Math.max(0, start - syntax.prefix.length), start);
+            const after = data.slice(end, end + syntax.suffix.length);
+            const alreadyWrapped = before.endsWith(syntax.prefix) && after.startsWith(syntax.suffix);
+
+            let replacement = wrapped;
+            let replaceStart = start;
+            let replaceEnd = end;
+            if (alreadyWrapped) {
+                replaceStart = start - syntax.prefix.length;
+                replaceEnd = end + syntax.suffix.length;
             }
-            const key = `sn${keyIndex}`;
 
-            // Insert reference at current cursor position (right after the wrapped text)
-            const cursorPos = editor.getCursor();
-            editor.replaceRange(`[^${key}]`, cursorPos);
+            let newData = data.slice(0, replaceStart) + replacement + data.slice(replaceEnd);
 
-            // Append definition at the end of the document
-            const updatedContent = editor.getValue();
-            const endPos = editor.offsetToPos(updatedContent.length);
-            let prefix = '\n\n';
-            if (/\n\s*\n$/.test(updatedContent)) {
-                prefix = '';
-            } else if (/\n$/.test(updatedContent)) {
-                prefix = '\n';
+            if (!this.settings.useInlineFootnotes && trimmedComment) {
+                // Generate a unique footnote key from the post-insertion content.
+                const usedKeys = new Set<string>();
+                const footnoteKeyRegex = /\[\^([a-zA-Z0-9_]+)\]/g;
+                let keyMatch;
+                while ((keyMatch = footnoteKeyRegex.exec(newData)) !== null) {
+                    usedKeys.add(keyMatch[1]);
+                }
+                let keyIndex = 1;
+                while (usedKeys.has(`sn${keyIndex}`)) {
+                    keyIndex++;
+                }
+                const key = `sn${keyIndex}`;
+
+                // Insert the reference immediately after the wrapped mark.
+                const refInsertAt = replaceStart + replacement.length;
+                newData = newData.slice(0, refInsertAt) + `[^${key}]` + newData.slice(refInsertAt);
+
+                // Append the definition at the very end of the document, matching
+                // Obsidian's standard footnote layout.
+                let defPrefix = '\n\n';
+                if (/\n\s*\n$/.test(newData)) {
+                    defPrefix = '';
+                } else if (/\n$/.test(newData)) {
+                    defPrefix = '\n';
+                }
+                const definitionContent = trimmedComment
+                    .replace(/\r\n/g, '\n')
+                    .replace(/\r/g, '\n')
+                    .split('\n')
+                    .join('\n    ');
+                newData = `${newData}${defPrefix}[^${key}]: ${definitionContent}`;
             }
-            const definitionContent = trimmedComment
-                .replace(/\r\n/g, '\n')
-                .replace(/\r/g, '\n')
-                .split('\n')
-                .join('\n    ');
-            editor.replaceRange(`${prefix}[^${key}]: ${definitionContent}`, endPos);
-        }
 
-        const content = editor.getValue();
+            return newData;
+        });
+
+        const content = await this.app.vault.cachedRead(file);
         this.detectAndStoreMarkdownHighlights(content, file);
 
         const fileHighlights = this.highlights.get(file.path) || [];
