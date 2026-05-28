@@ -835,11 +835,17 @@ export default class HighlightCommentsPlugin extends Plugin {
 
         return ViewPlugin.fromClass(class {
             decorations: DecorationSet;
+            private nativeMarkObserver: MutationObserver | null = null;
+            private nativeMarkSyncQueued = false;
 
             constructor(private view: EditorView) {
                 this.decorations = this.buildDecorations();
                 this.view.dom.addEventListener('click', this.handleClick);
+                this.nativeMarkObserver = new MutationObserver(() => this.syncNativeMarkStyles());
+                this.nativeMarkObserver.observe(this.view.dom, { childList: true, subtree: true });
                 this.syncNativeMarkStyles();
+                window.setTimeout(() => this.syncNativeMarkStyles(), 50);
+                window.setTimeout(() => this.syncNativeMarkStyles(), 250);
             }
 
             update(update: ViewUpdate) {
@@ -858,6 +864,7 @@ export default class HighlightCommentsPlugin extends Plugin {
 
             destroy() {
                 this.view.dom.removeEventListener('click', this.handleClick);
+                this.nativeMarkObserver?.disconnect();
             }
 
             private handleClick = (event: MouseEvent) => {
@@ -907,17 +914,24 @@ export default class HighlightCommentsPlugin extends Plugin {
             }
 
             private syncNativeMarkStyles() {
+                if (this.nativeMarkSyncQueued) return;
+                this.nativeMarkSyncQueued = true;
+
                 window.requestAnimationFrame(() => {
+                    this.nativeMarkSyncQueued = false;
+                    const filePath = plugin.getFilePathForEditorView(this.view);
+                    const highlights = filePath ? (plugin.highlights.get(filePath) || []) : [];
+
+                    this.syncRenderedUnderlineElements(highlights);
+
                     const markEls = Array.from(this.view.dom.querySelectorAll<HTMLElement>('.sidenote-highlight'));
 
                     for (const markEl of markEls) {
                         const highlightId = markEl.getAttribute('data-highlight-id');
-                        const filePath = plugin.getFilePathForEditorView(this.view);
-                        const highlight = filePath && highlightId
-                            ? (plugin.highlights.get(filePath) || []).find(h => h.id === highlightId)
+                        const highlight = highlightId
+                            ? highlights.find(h => h.id === highlightId)
                             : undefined;
-                        const style = highlight ? plugin.getSidenoteDecorationStyle(highlight) : '';
-                        if (style) markEl.setAttr('style', style);
+                        if (highlight) this.applySidenoteStyleProperties(markEl, highlight);
 
                         if (markEl.hasClass('sidenote-mark-underline')) {
                             this.applyNativeDecorationColor(markEl, 'underline', 'u, .cm-underline');
@@ -926,6 +940,48 @@ export default class HighlightCommentsPlugin extends Plugin {
                         }
                     }
                 });
+            }
+
+            private syncRenderedUnderlineElements(highlights: Highlight[]) {
+                const underlineHighlights = highlights.filter(h =>
+                    !h.isNativeComment &&
+                    (h.markType || 'highlight') === 'underline' &&
+                    h.text.trim() !== ''
+                );
+                if (underlineHighlights.length === 0) return;
+
+                const claimedIds = new Set<string>();
+                const underlineEls = Array.from(this.view.dom.querySelectorAll<HTMLElement>('u'));
+
+                for (const underlineEl of underlineEls) {
+                    const text = (underlineEl.textContent || '').trim();
+                    if (!text) continue;
+
+                    const existingId = underlineEl.getAttribute('data-highlight-id');
+                    const highlight = existingId
+                        ? underlineHighlights.find(h => h.id === existingId)
+                        : underlineHighlights.find(h => !claimedIds.has(h.id) && h.text.trim() === text);
+                    if (!highlight) continue;
+
+                    claimedIds.add(highlight.id);
+                    underlineEl.addClass('sidenote-highlight');
+                    underlineEl.addClass('sidenote-mark-underline');
+                    underlineEl.setAttr('data-highlight-id', highlight.id);
+                    this.applySidenoteStyleProperties(underlineEl, highlight);
+                    this.applyNativeDecorationColor(underlineEl, 'underline', 'u, .cm-underline');
+                }
+            }
+
+            private applySidenoteStyleProperties(markEl: HTMLElement, highlight: Highlight) {
+                const style = plugin.getSidenoteDecorationStyle(highlight);
+
+                for (const declaration of style.split(';')) {
+                    const [property, ...valueParts] = declaration.split(':');
+                    const value = valueParts.join(':').trim();
+                    if (property && value) {
+                        markEl.style.setProperty(property.trim(), value);
+                    }
+                }
             }
 
             private applyNativeDecorationColor(markEl: HTMLElement, line: 'underline' | 'line-through', selector: string) {
