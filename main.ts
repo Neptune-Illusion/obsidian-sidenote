@@ -1,6 +1,7 @@
 // main.ts
 import { App, Component, Editor, MarkdownRenderer, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf, debounce, normalizePath, setIcon } from 'obsidian';
-import { ViewPlugin } from '@codemirror/view';
+import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import { StateEffect } from '@codemirror/state';
 import { HighlightsSidebarView } from './src/views/sidebar-view';
 import { InlineFootnoteManager } from './src/managers/inline-footnote-manager';
 import { ExcludedFilesModal } from './src/modals/excluded-files-modal';
@@ -220,6 +221,7 @@ const DEFAULT_SETTINGS: CommentPluginSettings = {
 
 const VIEW_TYPE_HIGHLIGHTS = 'sidenote-view';
 const HOVER_SOURCE_SIDENOTE = 'sidenote';
+const REFRESH_SIDENOTE_DECORATIONS = StateEffect.define<void>();
 
 export default class HighlightCommentsPlugin extends Plugin {
     settings: CommentPluginSettings;
@@ -439,7 +441,10 @@ export default class HighlightCommentsPlugin extends Plugin {
             this.decorateReadingModeHighlights(el, ctx.sourcePath);
         });
 
-        this.registerEditorExtension(this.createSidenoteSelectionToolbarPlugin());
+        this.registerEditorExtension([
+            this.createSidenoteSelectionToolbarPlugin(),
+            this.createSidenoteEditorHighlightPlugin()
+        ]);
         this.registerDomEvent(document, 'mouseover', (event) => this.handleLivePreviewHighlightMouseover(event));
         this.registerDomEvent(document, 'mouseout', (event) => this.handleLivePreviewHighlightMouseout(event));
 
@@ -574,6 +579,18 @@ export default class HighlightCommentsPlugin extends Plugin {
         this.settings.collections = Object.fromEntries(this.collections);
         await this.saveData(this.settings);
         this.updateStyles();
+        this.refreshEditorDecorations();
+    }
+
+    refreshEditorDecorations() {
+        this.app.workspace.iterateAllLeaves((leaf) => {
+            if (leaf.view instanceof MarkdownView) {
+                const cm = (leaf.view.editor as any)?.cm;
+                if (cm?.dispatch) {
+                    cm.dispatch({ effects: REFRESH_SIDENOTE_DECORATIONS.of() });
+                }
+            }
+        });
     }
 
     addStyles() {
@@ -797,6 +814,141 @@ export default class HighlightCommentsPlugin extends Plugin {
                 this.hideToolbar();
             }
         });
+    }
+
+    private createSidenoteEditorHighlightPlugin() {
+        const plugin = this;
+
+        return ViewPlugin.fromClass(class {
+            decorations: DecorationSet;
+
+            constructor(private view: EditorView) {
+                this.decorations = this.buildDecorations();
+                this.view.dom.addEventListener('click', this.handleClick);
+            }
+
+            update(update: ViewUpdate) {
+                const shouldRefresh =
+                    update.docChanged ||
+                    update.viewportChanged ||
+                    update.transactions.some(transaction =>
+                        transaction.effects.some(effect => effect.is(REFRESH_SIDENOTE_DECORATIONS))
+                    );
+
+                if (shouldRefresh) {
+                    this.decorations = this.buildDecorations();
+                }
+            }
+
+            destroy() {
+                this.view.dom.removeEventListener('click', this.handleClick);
+            }
+
+            private handleClick = (event: MouseEvent) => {
+                const target = event.target as HTMLElement;
+                const highlightEl = target.closest('.sidenote-highlight') as HTMLElement | null;
+                const highlightId = highlightEl?.getAttribute('data-highlight-id');
+                if (!highlightId) return;
+
+                plugin.selectedHighlightId = highlightId;
+                plugin.activateView();
+                plugin.refreshSidebar();
+            };
+
+            private buildDecorations(): DecorationSet {
+                if (!plugin.settings.showHighlights) {
+                    return Decoration.set([]);
+                }
+
+                const filePath = plugin.getFilePathForEditorView(this.view);
+                if (!filePath) {
+                    return Decoration.set([]);
+                }
+
+                const content = this.view.state.doc.toString();
+                const docLength = this.view.state.doc.length;
+                const ranges: any[] = [];
+                const highlights = plugin.highlights.get(filePath) || [];
+
+                for (const highlight of highlights) {
+                    if (highlight.isNativeComment) continue;
+
+                    const range = plugin.getEditorDecorationRange(highlight, content, docLength);
+                    if (!range) continue;
+
+                    const markType = highlight.markType || 'highlight';
+                    const decoration = Decoration.mark({
+                        class: `sidenote-highlight sidenote-mark-${markType}`,
+                        attributes: {
+                            'data-highlight-id': highlight.id,
+                            style: plugin.getSidenoteDecorationStyle(highlight)
+                        }
+                    });
+                    ranges.push(decoration.range(range.from, range.to));
+                }
+
+                return Decoration.set(ranges, true);
+            }
+        }, {
+            decorations: value => value.decorations
+        });
+    }
+
+    private getFilePathForEditorView(view: EditorView): string | null {
+        let filePath: string | null = null;
+
+        this.app.workspace.iterateAllLeaves((leaf) => {
+            if (leaf.view instanceof MarkdownView && (leaf.view.editor as any)?.cm === view) {
+                filePath = leaf.view.file?.path || null;
+            }
+        });
+
+        return filePath;
+    }
+
+    private getEditorDecorationRange(highlight: Highlight, content: string, docLength: number): { from: number; to: number } | null {
+        let from = highlight.startOffset;
+        let to = highlight.endOffset;
+
+        if (from < 0 || to > docLength || from >= to) {
+            return null;
+        }
+
+        const slice = content.substring(from, to);
+        if (!slice.includes(highlight.text)) {
+            return null;
+        }
+
+        if (highlight.type === 'highlight' || !highlight.type) {
+            if (slice.startsWith('==') && slice.endsWith('==')) {
+                from += 2;
+                to -= 2;
+            }
+        } else if (highlight.type === 'html' || highlight.type === 'custom') {
+            const textIndex = slice.indexOf(highlight.text);
+            if (textIndex >= 0) {
+                from += textIndex;
+                to = from + highlight.text.length;
+            }
+        }
+
+        if (from < 0 || to > docLength || from >= to) {
+            return null;
+        }
+
+        return { from, to };
+    }
+
+    private getSidenoteDecorationStyle(highlight: Highlight): string {
+        const color = highlight.color || this.settings.highlightColor;
+        const rgb = this.hexToRgb(color);
+        const opacity = this.settings.highlightOpacity ?? 0.2;
+
+        return [
+            `--sidenote-highlight-color: rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity})`,
+            `--sidenote-highlight-hover: rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Math.min(opacity + 0.15, 1)})`,
+            `--sidenote-highlight-border: rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Math.min(opacity + 0.4, 1)})`
+        ].join('; ');
     }
 
     private openFloatingCommentForSelection(editor: Editor, view: MarkdownView, markType: Highlight['markType'] = 'highlight', initialColor?: string) {

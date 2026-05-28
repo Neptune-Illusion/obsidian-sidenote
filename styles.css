@@ -20,7 +20,36 @@
     display: inline-block !important;
 }
 
-/* Plugin does not style editor highlights - themes handle .cm-highlight completely */
+/* Side Note's editor overlay restores v0.1 mark styles and per-comment colors. */
+.markdown-source-view .sidenote-highlight {
+    background-color: var(--sidenote-highlight-color, rgba(255, 208, 0, 0.2)) !important;
+    border-bottom: 2px solid var(--sidenote-highlight-border, rgba(255, 208, 0, 0.6));
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.markdown-source-view .sidenote-highlight:hover {
+    background-color: var(--sidenote-highlight-hover, rgba(255, 208, 0, 0.4)) !important;
+}
+
+.markdown-source-view .sidenote-highlight.sidenote-mark-underline {
+    background-color: transparent !important;
+}
+
+.markdown-source-view .sidenote-highlight.sidenote-mark-strikethrough {
+    background-color: transparent !important;
+    border-bottom: none;
+    text-decoration: line-through;
+    text-decoration-color: var(--sidenote-highlight-border, rgba(255, 208, 0, 0.6));
+    text-decoration-thickness: 2px;
+}
+
+.markdown-source-view .sidenote-highlight.sidenote-mark-bold {
+    background-color: transparent !important;
+    border-bottom: none;
+    color: var(--sidenote-highlight-border, rgba(255, 208, 0, 0.6));
+    font-weight: bold;
+}
 
 /* Sidebar highlights in tasks - use same styling as editor */
 .task-text-content .cm-highlight,
