@@ -737,6 +737,20 @@ export default class HighlightCommentsPlugin extends Plugin {
         new Notice('Highlight created');
     }
 
+    private getSidenoteMarkSyntax(markType: Highlight['markType'] = 'highlight'): { prefix: string; suffix: string } {
+        switch (markType) {
+            case 'bold':
+                return { prefix: '**', suffix: '**' };
+            case 'strikethrough':
+                return { prefix: '~~', suffix: '~~' };
+            case 'underline':
+                return { prefix: '<u>', suffix: '</u>' };
+            case 'highlight':
+            default:
+                return { prefix: '==', suffix: '==' };
+        }
+    }
+
     private createSidenoteSelectionToolbarPlugin() {
         const plugin = this;
         return ViewPlugin.fromClass(class {
@@ -920,9 +934,21 @@ export default class HighlightCommentsPlugin extends Plugin {
         }
 
         if (highlight.type === 'highlight' || !highlight.type) {
-            if (slice.startsWith('==') && slice.endsWith('==')) {
-                from += 2;
-                to -= 2;
+            const markType = highlight.markType || 'highlight';
+            const syntax = this.getSidenoteMarkSyntax(markType);
+            const lowerSlice = slice.toLowerCase();
+            const lowerPrefix = syntax.prefix.toLowerCase();
+            const lowerSuffix = syntax.suffix.toLowerCase();
+
+            if (lowerSlice.startsWith(lowerPrefix) && lowerSlice.endsWith(lowerSuffix)) {
+                from += syntax.prefix.length;
+                to -= syntax.suffix.length;
+            } else {
+                const textIndex = slice.indexOf(highlight.text);
+                if (textIndex >= 0) {
+                    from += textIndex;
+                    to = from + highlight.text.length;
+                }
             }
         } else if (highlight.type === 'html' || highlight.type === 'custom') {
             const textIndex = slice.indexOf(highlight.text);
@@ -1002,7 +1028,8 @@ export default class HighlightCommentsPlugin extends Plugin {
     private async addSidenoteCommentToSelection(editor: Editor, file: TFile, selectedText: string, comment: string, color?: string, markType: Highlight['markType'] = 'highlight') {
         const fromCursor = editor.getCursor('from');
         const toCursor = editor.getCursor('to');
-        const wrapped = `==${selectedText}==${comment.trim() ? `^[${comment.trim()}]` : ''}`;
+        const syntax = this.getSidenoteMarkSyntax(markType);
+        const wrapped = `${syntax.prefix}${selectedText}${syntax.suffix}${comment.trim() ? `^[${comment.trim()}]` : ''}`;
         editor.replaceSelection(wrapped);
 
         const content = editor.getValue();
@@ -1029,11 +1056,20 @@ export default class HighlightCommentsPlugin extends Plugin {
         const highlights = this.highlights.get(sourcePath) || [];
         if (highlights.length === 0) return;
 
-        const marks = Array.from(containerEl.querySelectorAll('mark'));
-        for (const mark of marks) {
-            const markEl = mark as HTMLElement;
+        const renderedMarks: Array<{ el: HTMLElement; markType: Highlight['markType'] }> = [
+            ...Array.from(containerEl.querySelectorAll('mark')).map(el => ({ el: el as HTMLElement, markType: 'highlight' as Highlight['markType'] })),
+            ...Array.from(containerEl.querySelectorAll('strong')).map(el => ({ el: el as HTMLElement, markType: 'bold' as Highlight['markType'] })),
+            ...Array.from(containerEl.querySelectorAll('del, s')).map(el => ({ el: el as HTMLElement, markType: 'strikethrough' as Highlight['markType'] })),
+            ...Array.from(containerEl.querySelectorAll('u')).map(el => ({ el: el as HTMLElement, markType: 'underline' as Highlight['markType'] }))
+        ];
+
+        for (const { el: markEl, markType } of renderedMarks) {
             const text = (markEl.textContent || '').trim();
-            const highlight = highlights.find(h => !h.isNativeComment && h.text.trim() === text);
+            const highlight = highlights.find(h =>
+                !h.isNativeComment &&
+                (h.markType || 'highlight') === (markType || 'highlight') &&
+                h.text.trim() === text
+            );
             if (!highlight) continue;
 
             markEl.addClass('sidenote-reading-highlight');
@@ -1091,7 +1127,7 @@ export default class HighlightCommentsPlugin extends Plugin {
 
     private handleLivePreviewHighlightMouseover(event: MouseEvent) {
         const target = event.target as HTMLElement;
-        const markEl = target.closest('.markdown-source-view.mod-cm6 .cm-highlight') as HTMLElement | null;
+        const markEl = target.closest('.markdown-source-view.mod-cm6 .cm-highlight, .markdown-source-view.mod-cm6 .sidenote-highlight') as HTMLElement | null;
         if (!markEl) return;
 
         const text = (markEl.textContent || '').trim();
@@ -1114,7 +1150,7 @@ export default class HighlightCommentsPlugin extends Plugin {
         const related = event.relatedTarget as HTMLElement | null;
         if (related?.closest('.sidenote-tooltip')) return;
         const target = event.target as HTMLElement;
-        if (target.closest('.markdown-source-view.mod-cm6 .cm-highlight')) {
+        if (target.closest('.markdown-source-view.mod-cm6 .cm-highlight, .markdown-source-view.mod-cm6 .sidenote-highlight')) {
             this.hideLivePreviewTooltip();
         }
     }
@@ -1745,8 +1781,9 @@ export default class HighlightCommentsPlugin extends Plugin {
             return commentPattern.test(fileContent);
         }
 
-        // For regular highlights, check if it's still highlighted
-        const highlightPattern = new RegExp(`==\\s*${this.escapeRegex(highlight.text)}\\s*==`);
+        // For regular highlights, check if it's still wrapped with its source mark.
+        const syntax = this.getSidenoteMarkSyntax(highlight.markType || 'highlight');
+        const highlightPattern = new RegExp(`${this.escapeRegex(syntax.prefix)}\\s*${this.escapeRegex(highlight.text)}\\s*${this.escapeRegex(syntax.suffix)}`);
         return highlightPattern.test(fileContent);
     }
 
@@ -2507,10 +2544,16 @@ export default class HighlightCommentsPlugin extends Plugin {
         const usedExistingHighlights = new Set<string>(); // Track which highlights we've already matched
         
         // Create a more robust matching system that considers text, position, and type
-        const findExistingHighlight = (text: string, startOffset: number, endOffset: number, isComment: boolean): Highlight | undefined => {
+        const findExistingHighlight = (text: string, startOffset: number, endOffset: number, isComment: boolean, markType: Highlight['markType'] = 'highlight'): Highlight | undefined => {
+            const matchesMarkType = (highlight: Highlight): boolean => {
+                if (isComment) return true;
+                return (highlight.markType || 'highlight') === (markType || 'highlight');
+            };
+
             // First, try exact position match
             let exactMatch = existingHighlightsForFile.find(h => 
                 !usedExistingHighlights.has(h.id) &&
+                matchesMarkType(h) &&
                 h.text === text && 
                 h.startOffset === startOffset && 
                 h.endOffset === endOffset &&
@@ -2524,6 +2567,7 @@ export default class HighlightCommentsPlugin extends Plugin {
             // If no exact match, try fuzzy position match (within 50 characters)
             let fuzzyMatch = existingHighlightsForFile.find(h => 
                 !usedExistingHighlights.has(h.id) &&
+                matchesMarkType(h) &&
                 h.text === text && 
                 Math.abs(h.startOffset - startOffset) <= 50 &&
                 h.isNativeComment === isComment
@@ -2536,6 +2580,7 @@ export default class HighlightCommentsPlugin extends Plugin {
             // If still no match, try text-only match for highlights that might have moved significantly
             let textMatch = existingHighlightsForFile.find(h => 
                 !usedExistingHighlights.has(h.id) &&
+                matchesMarkType(h) &&
                 h.text === text && 
                 h.isNativeComment === isComment &&
                 !existingHighlightsForFile.some(other => 
@@ -2559,8 +2604,16 @@ export default class HighlightCommentsPlugin extends Plugin {
         // Get markdown link ranges to exclude highlights within URLs
         const markdownLinkRanges = this.getMarkdownLinkRanges(content);
 
-        // Process all highlight types
-        const allMatches: Array<{match: RegExpExecArray, type: 'highlight' | 'comment' | 'html', color?: string, isCustomPattern?: boolean}> = [];
+        // Process all highlight types. Native bold/strike/underline matches are only
+        // treated as Side Note entries when followed by a Side Note anchor.
+        const allMatches: Array<{
+            match: RegExpExecArray;
+            type: 'highlight' | 'comment' | 'html';
+            color?: string;
+            isCustomPattern?: boolean;
+            markType?: Highlight['markType'];
+            requiresSidenoteAnchor?: boolean;
+        }> = [];
 
         // Find all highlight matches
         let match;
@@ -2582,7 +2635,40 @@ export default class HighlightCommentsPlugin extends Plugin {
                 continue;
             }
 
-            allMatches.push({match, type: 'highlight'});
+            allMatches.push({match, type: 'highlight', markType: 'highlight'});
+        }
+
+        const nativeMarkPatterns: Array<{ markType: Highlight['markType']; regex: RegExp; boundary: string | null }> = [
+            { markType: 'bold', regex: /\*\*((?:[^*]|\*(?!\*))+?)\*\*/g, boundary: '*' },
+            { markType: 'strikethrough', regex: /~~((?:[^~]|~(?!~))+?)~~/g, boundary: '~' },
+            { markType: 'underline', regex: /<u>([\s\S]+?)<\/u>/gi, boundary: null }
+        ];
+
+        for (const { markType, regex, boundary } of nativeMarkPatterns) {
+            while ((match = regex.exec(content)) !== null) {
+                if (this.isInsideCodeBlock(match.index, match.index + match[0].length, codeBlockRanges)) {
+                    continue;
+                }
+
+                if (this.isHighlightDelimiterInLink(match.index, match.index + match[0].length, content, markdownLinkRanges)) {
+                    continue;
+                }
+
+                if (boundary) {
+                    const beforeMatch = content.charAt(match.index - 1);
+                    const afterMatch = content.charAt(match.index + match[0].length);
+                    if (beforeMatch === boundary || afterMatch === boundary) {
+                        continue;
+                    }
+                }
+
+                allMatches.push({
+                    match,
+                    type: 'highlight',
+                    markType,
+                    requiresSidenoteAnchor: true
+                });
+            }
         }
         
         // Find all comment matches
@@ -2679,7 +2765,7 @@ export default class HighlightCommentsPlugin extends Plugin {
             const modifiedMatch: any = [htmlMatch.fullMatch, htmlMatch.text];
             modifiedMatch.index = htmlMatch.startOffset;
             modifiedMatch.input = content;
-            allMatches.push({match: modifiedMatch, type: 'html', color: htmlMatch.color});
+            allMatches.push({match: modifiedMatch, type: 'html', color: htmlMatch.color, markType: 'highlight'});
         });
         
         // Sort matches by position in content
@@ -2733,7 +2819,7 @@ export default class HighlightCommentsPlugin extends Plugin {
             }
         }
 
-        allMatches.forEach(({match, type, color, skip, isCustomPattern}: any, index) => {
+        allMatches.forEach(({match, type, color, skip, isCustomPattern, markType, requiresSidenoteAnchor}: any, index) => {
             // Skip matches that were merged as adjacent comments
             if (skip) return;
             const [, highlightText] = match;
@@ -2748,7 +2834,8 @@ export default class HighlightCommentsPlugin extends Plugin {
                 highlightText, 
                 match.index, 
                 match.index + match[0].length, 
-                type === 'comment'
+                type === 'comment',
+                markType || 'highlight'
             );
             
             // Calculate line number from offset
@@ -2766,6 +2853,8 @@ export default class HighlightCommentsPlugin extends Plugin {
                 
                 // First, get all inline footnotes with their positions
                 const inlineFootnotes = this.inlineFootnoteManager.extractInlineFootnotes(content, match.index + match[0].length);
+                const hasInlineFootnoteAnchor = inlineFootnotes.length > 0;
+                let hasStandardFootnoteAnchor = false;
                 inlineFootnotes.forEach(footnote => {
                     if (footnote.content.trim()) {
                         allFootnotes.push({
@@ -2788,6 +2877,7 @@ export default class HighlightCommentsPlugin extends Plugin {
                     const isValid = FOOTNOTE_VALIDATION_REGEX.test(precedingText);
                     
                     if (match_sf.index === lastValidPosition || isValid) {
+                        hasStandardFootnoteAnchor = true;
                         const key = match_sf[2]; // The key inside [^key]
                         if (footnoteMap.has(key)) {
                             const fnContent = footnoteMap.get(key)!.trim();
@@ -2807,7 +2897,8 @@ export default class HighlightCommentsPlugin extends Plugin {
                 }
 
                 // Add adjacent comment if present
-                if (adjacentComments.has(index)) {
+                const hasAdjacentCommentAnchor = adjacentComments.has(index);
+                if (hasAdjacentCommentAnchor) {
                     const adjacentComment = adjacentComments.get(index)!;
                     allFootnotes.push({
                         type: 'inline' as 'inline',
@@ -2822,6 +2913,10 @@ export default class HighlightCommentsPlugin extends Plugin {
                 // Extract content in the correct order
                 footnoteContents = allFootnotes.map(f => f.content);
                 footnoteCount = footnoteContents.length;
+
+                if (requiresSidenoteAnchor && !hasInlineFootnoteAnchor && !hasStandardFootnoteAnchor && !hasAdjacentCommentAnchor) {
+                    return;
+                }
                 
             } else if (type === 'comment') {
                 // For comments, the text itself IS the comment content
@@ -2841,7 +2936,7 @@ export default class HighlightCommentsPlugin extends Plugin {
                     isNativeComment: type === 'comment',
                     // Update color for HTML highlights, preserve existing for others
                     color: type === 'html' ? color : existingHighlight.color,
-                    markType: existingHighlight.markType || 'highlight',
+                    markType: type === 'comment' ? undefined : (markType || existingHighlight.markType || 'highlight'),
                     // Preserve existing createdAt timestamp if it exists
                     createdAt: existingHighlight.createdAt || Date.now(),
                     // Store the type for proper identification
@@ -2867,7 +2962,7 @@ export default class HighlightCommentsPlugin extends Plugin {
                     isNativeComment: type === 'comment',
                     // Set color for HTML highlights
                     color: type === 'html' ? color : undefined,
-                    markType: 'highlight',
+                    markType: type === 'comment' ? undefined : (markType || 'highlight'),
                     // Store the type for proper identification
                     type: isCustomPattern ? 'custom' : type,
                     // Store full match for custom patterns
@@ -2936,6 +3031,7 @@ export default class HighlightCommentsPlugin extends Plugin {
                         footnotes: oldHighlight.footnoteCount, 
                         contents: oldHighlight.footnoteContents?.filter(c => c.trim() !== ''), 
                         color: oldHighlight.color,
+                        markType: oldHighlight.markType,
                         isNativeComment: oldHighlight.isNativeComment
                     });
                     const newJSON = JSON.stringify({
@@ -2943,6 +3039,7 @@ export default class HighlightCommentsPlugin extends Plugin {
                         footnotes: newHighlight.footnoteCount, 
                         contents: newHighlight.footnoteContents?.filter(c => c.trim() !== ''), 
                         color: newHighlight.color,
+                        markType: newHighlight.markType,
                         isNativeComment: newHighlight.isNativeComment
                     });
                     

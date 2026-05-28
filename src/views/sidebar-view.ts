@@ -4668,9 +4668,10 @@ export class HighlightsSidebarView extends ItemView {
                 insertPos = { line: highlightEndPos.line, ch: highlightEndPos.ch + footnoteEndLength };
             }
         } else {
-            // Regular markdown highlight - use regex to find in full content
+            // Native Obsidian-rendered Side Note mark - use regex to find in full content
             const escapedText = this.escapeRegex(highlight.text);
-            const markdownHighlightPattern = `==${escapedText}==`;
+            const syntax = this.getSidenoteMarkSyntax(highlight.markType || 'highlight');
+            const markdownHighlightPattern = `${this.escapeRegex(syntax.prefix)}${escapedText}${this.escapeRegex(syntax.suffix)}`;
             const markdownHighlightRegex = new RegExp(markdownHighlightPattern, 'g');
 
             let bestMatch: { index: number, length: number } | null = null;
@@ -4802,9 +4803,10 @@ export class HighlightsSidebarView extends ItemView {
 
     private findAndParseHighlight(content: string, originalHighlight: Highlight, footnoteMap: Map<string, string>): Highlight | null {
         // This is a simplified version - we're looking for the same highlight text and updating its footnotes
+        const syntax = this.getSidenoteMarkSyntax(originalHighlight.markType || 'highlight');
         const regex = originalHighlight.isNativeComment ? 
             new RegExp(`%%${this.escapeRegex(originalHighlight.text)}%%`, 'g') :
-            new RegExp(`==${this.escapeRegex(originalHighlight.text)}==`, 'g');
+            new RegExp(`${this.escapeRegex(syntax.prefix)}${this.escapeRegex(originalHighlight.text)}${this.escapeRegex(syntax.suffix)}`, 'g');
         
         let match;
         while ((match = regex.exec(content)) !== null) {
@@ -5181,16 +5183,17 @@ export class HighlightsSidebarView extends ItemView {
                 });
             }
         } else {
-            // Regular markdown highlight pattern
-            const regexPattern = `==${this.escapeRegex(highlight.text)}==`;
+            // Native Obsidian-rendered Side Note mark patterns.
+            const syntax = this.getSidenoteMarkSyntax(highlight.markType || 'highlight');
+            const regexPattern = `${this.escapeRegex(syntax.prefix)}${this.escapeRegex(highlight.text)}${this.escapeRegex(syntax.suffix)}`;
             const regex = new RegExp(regexPattern, 'g');
             let matchResult;
             while ((matchResult = regex.exec(content)) !== null) {
                 matches.push({
                     index: matchResult.index,
                     length: matchResult[0].length,
-                    tagStartLength: 2, // ==
-                    tagEndLength: 2    // ==
+                    tagStartLength: syntax.prefix.length,
+                    tagEndLength: syntax.suffix.length
                 });
             }
 
@@ -5271,6 +5274,20 @@ export class HighlightsSidebarView extends ItemView {
 
     private escapeRegex(text: string): string {
         return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    private getSidenoteMarkSyntax(markType: Highlight['markType'] = 'highlight'): { prefix: string; suffix: string } {
+        switch (markType) {
+            case 'bold':
+                return { prefix: '**', suffix: '**' };
+            case 'strikethrough':
+                return { prefix: '~~', suffix: '~~' };
+            case 'underline':
+                return { prefix: '<u>', suffix: '</u>' };
+            case 'highlight':
+            default:
+                return { prefix: '==', suffix: '==' };
+        }
     }
 
     private async focusFootnoteInEditor(highlight: Highlight, footnoteIndex: number, event?: MouseEvent) {
@@ -5358,8 +5375,8 @@ export class HighlightsSidebarView extends ItemView {
                     minDistance = 0; // Found exact match
                 }
             } else {
-                // Regular markdown highlight pattern
-                const regexPattern = `==${escapedText}==`;
+                const syntax = this.getSidenoteMarkSyntax(highlight.markType || 'highlight');
+                const regexPattern = `${this.escapeRegex(syntax.prefix)}${escapedText}${this.escapeRegex(syntax.suffix)}`;
                 const highlightRegex = new RegExp(regexPattern, 'g');
                 let match;
                 while ((match = highlightRegex.exec(content)) !== null) {
@@ -6965,8 +6982,8 @@ export class HighlightsSidebarView extends ItemView {
         if (highlight.isNativeComment) {
             text = `%%${highlight.text}%%`;
         } else {
-            // Both regular markdown and HTML highlights export as ==text==
-            text = `==${highlight.text}==`;
+            const syntax = this.getSidenoteMarkSyntax(highlight.markType || 'highlight');
+            text = `${syntax.prefix}${highlight.text}${syntax.suffix}`;
         }
 
         // Append footnotes/comments (but not for native comments — the text is the comment)

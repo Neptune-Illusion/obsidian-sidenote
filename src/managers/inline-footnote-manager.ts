@@ -68,8 +68,21 @@ export class InlineFootnoteManager {
     }
 
     private isHtmlHighlight(highlight: Highlight): boolean {
-        // HTML highlights have a color property and are not native comments
-        return !highlight.isNativeComment && !!highlight.color;
+        return highlight.type === 'html';
+    }
+
+    private getSidenoteMarkSyntax(markType: Highlight['markType'] = 'highlight'): { prefix: string; suffix: string } {
+        switch (markType) {
+            case 'bold':
+                return { prefix: '**', suffix: '**' };
+            case 'strikethrough':
+                return { prefix: '~~', suffix: '~~' };
+            case 'underline':
+                return { prefix: '<u>', suffix: '</u>' };
+            case 'highlight':
+            default:
+                return { prefix: '==', suffix: '==' };
+        }
     }
     
     /**
@@ -260,8 +273,8 @@ export class InlineFootnoteManager {
                 minDistance = 0; // Found exact match
             }
         } else {
-            // Regular markdown highlight pattern
-            const regexPattern = `==${escapedText}==`;
+            const syntax = this.getSidenoteMarkSyntax(highlight.markType || 'highlight');
+            const regexPattern = `${this.escapeRegex(syntax.prefix)}${escapedText}${this.escapeRegex(syntax.suffix)}`;
             const highlightRegex = new RegExp(regexPattern, 'g');
             let match;
             while ((match = highlightRegex.exec(content)) !== null) {

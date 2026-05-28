@@ -115,6 +115,20 @@ export class HighlightRenderer {
         return colorMap[color] || 'highlight-color-default';
     }
 
+    private getSidenoteMarkSyntax(markType: Highlight['markType'] = 'highlight'): { prefix: string; suffix: string } {
+        switch (markType) {
+            case 'bold':
+                return { prefix: '**', suffix: '**' };
+            case 'strikethrough':
+                return { prefix: '~~', suffix: '~~' };
+            case 'underline':
+                return { prefix: '<u>', suffix: '</u>' };
+            case 'highlight':
+            default:
+                return { prefix: '==', suffix: '==' };
+        }
+    }
+
     private createQuoteSection(item: HTMLElement, highlight: Highlight, options: HighlightRenderOptions): void {
         const quoteEl = item.createDiv({ cls: 'highlight-quote' });
         this.renderMarkdownToElement(quoteEl, highlight.text);
@@ -307,8 +321,8 @@ export class HighlightRenderer {
                 // HTML highlights - just copy the text content (can't reconstruct exact HTML)
                 textToCopy = `==${highlight.text}==`;
             } else {
-                // Regular markdown highlight: ==text==
-                textToCopy = `==${highlight.text}==`;
+                const syntax = this.getSidenoteMarkSyntax(highlight.markType || 'highlight');
+                textToCopy = `${syntax.prefix}${highlight.text}${syntax.suffix}`;
             }
 
             // Add footnotes/comments if they exist (but not for native comments)
