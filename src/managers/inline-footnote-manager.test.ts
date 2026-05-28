@@ -529,8 +529,8 @@ describe('InlineFootnoteManager', () => {
             const result = manager.insertStandardFootnote(editor as any, highlight, 'my comment');
 
             expect(result.success).toBe(true);
-            expect(result.key).toBe('sn1');
-            expect(editor.getValue()).toBe('Paragraph with ==highlighted text==[^sn1] here.\n\nNext paragraph.\n\n[^sn1]: my comment');
+            expect(result.key).toBe('1');
+            expect(editor.getValue()).toBe('Paragraph with ==highlighted text==[^1] here.\n\nNext paragraph.\n\n[^1]: my comment');
         });
 
         it('should keep table syntax intact and place the definition after the table', () => {
@@ -549,11 +549,11 @@ describe('InlineFootnoteManager', () => {
             const result = manager.insertStandardFootnote(editor as any, highlight, 'table comment');
 
             expect(result.success).toBe(true);
-            expect(editor.getValue()).toBe('| A | B |\n| - | - |\n| ==cell==[^sn1] | value |\n\nAfter table.\n\n[^sn1]: table comment');
+            expect(editor.getValue()).toBe('| A | B |\n| - | - |\n| ==cell==[^1] | value |\n\nAfter table.\n\n[^1]: table comment');
         });
 
         it('should generate a unique standard footnote key', () => {
-            const editor = new MockEditor('==text==\n\n[^sn1]: existing');
+            const editor = new MockEditor('==text==\n\n[^1]: existing');
             const highlight = {
                 id: '1',
                 text: 'text',
@@ -568,8 +568,8 @@ describe('InlineFootnoteManager', () => {
             const result = manager.insertStandardFootnote(editor as any, highlight, 'new');
 
             expect(result.success).toBe(true);
-            expect(result.key).toBe('sn2');
-            expect(editor.getValue()).toBe('==text==[^sn2]\n\n[^sn1]: existing\n\n[^sn2]: new');
+            expect(result.key).toBe('2');
+            expect(editor.getValue()).toBe('==text==[^2]\n\n[^1]: existing\n\n[^2]: new');
         });
 
         it('should indent multiline standard footnote definitions', () => {
@@ -588,7 +588,7 @@ describe('InlineFootnoteManager', () => {
             const result = manager.insertStandardFootnote(editor as any, highlight, 'line one\nline two');
 
             expect(result.success).toBe(true);
-            expect(editor.getValue()).toBe('==text==[^sn1]\n\n[^sn1]: line one\n    line two');
+            expect(editor.getValue()).toBe('==text==[^1]\n\n[^1]: line one\n    line two');
         });
     });
 

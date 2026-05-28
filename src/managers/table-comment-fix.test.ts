@@ -50,8 +50,8 @@ function processStandardFootnote(
         let keyMatch: RegExpExecArray | null;
         while ((keyMatch = footnoteKeyRegex.exec(newData)) !== null) usedKeys.add(keyMatch[1]);
         let keyIndex = 1;
-        while (usedKeys.has(`sn${keyIndex}`)) keyIndex++;
-        const key = `sn${keyIndex}`;
+        while (usedKeys.has(`${keyIndex}`)) keyIndex++;
+        const key = `${keyIndex}`;
 
         const refInsertAt = start + wrapped.length;
         newData = newData.slice(0, refInsertAt) + `[^${key}]` + newData.slice(refInsertAt);
@@ -77,15 +77,15 @@ describe('Table-cell comment placement (vault.process fix)', () => {
         ].join('\n');
         const out = processStandardFootnote(doc, 'CELLTEXT', 'table comment', doc.indexOf('CELLTEXT'));
 
-        expect(out).toContain('| ==CELLTEXT==[^sn1] | other |');
+        expect(out).toContain('| ==CELLTEXT==[^1] | other |');
         const cellRow = out.split('\n').find(l => l.includes('CELLTEXT'))!;
         expect((cellRow.match(/\|/g) || []).length).toBe(3);
         // Definition is truly at document end, after the trailing paragraph.
-        expect(out.indexOf('[^sn1]: table comment')).toBeGreaterThan(out.indexOf('Paragraph after table.'));
-        expect(out.split('\n').filter(l => l.trim()).pop()).toBe('[^sn1]: table comment');
+        expect(out.indexOf('[^1]: table comment')).toBeGreaterThan(out.indexOf('Paragraph after table.'));
+        expect(out.split('\n').filter(l => l.trim()).pop()).toBe('[^1]: table comment');
         // No orphaned definition: exactly one reference and one definition.
-        expect((out.match(/\[\^sn1\](?!:)/g) || []).length).toBe(1);
-        expect((out.match(/\[\^sn1\]:/g) || []).length).toBe(1);
+        expect((out.match(/\[\^1\](?!:)/g) || []).length).toBe(1);
+        expect((out.match(/\[\^1\]:/g) || []).length).toBe(1);
     });
 
     it('picks the occurrence nearest the cursor when the selection text is duplicated', () => {
@@ -93,32 +93,32 @@ describe('Table-cell comment placement (vault.process fix)', () => {
         const secondApple = doc.indexOf('apple', doc.indexOf('apple') + 1);
         const out = processStandardFootnote(doc, 'apple', 'cmt', secondApple);
         // Only the middle "apple" is wrapped.
-        expect(out).toBe('apple one and ==apple==[^sn1] two and apple three.\n\n[^sn1]: cmt');
+        expect(out).toBe('apple one and ==apple==[^1] two and apple three.\n\n[^1]: cmt');
     });
 
     it('handles regex-special characters in the selected text (plain string match)', () => {
         const doc = 'Code: arr[i] = (a+b)*c here.';
         const out = processStandardFootnote(doc, 'arr[i] = (a+b)*c', 'regexy', doc.indexOf('arr['));
-        expect(out).toContain('==arr[i] = (a+b)*c==[^sn1]');
-        expect(out).toContain('[^sn1]: regexy');
+        expect(out).toContain('==arr[i] = (a+b)*c==[^1]');
+        expect(out).toContain('[^1]: regexy');
     });
 
     it('inline-footnote mode wraps the cell with ^[..] and no bottom definition', () => {
         const doc = '| a | CELLTEXT |\n|---|---|\n| x | y |';
         const out = processStandardFootnote(doc, 'CELLTEXT', 'inline note', doc.indexOf('CELLTEXT'), '==', '==', true);
         expect(out).toContain('==CELLTEXT==^[inline note]');
-        expect(out).not.toContain('[^sn1]:');
+        expect(out).not.toContain('[^1]:');
     });
 
     it('multiline comment is indented as a continuation in the definition', () => {
         const out = processStandardFootnote('Para with TARGET.', 'TARGET', 'line one\nline two', 'Para with '.length);
-        expect(out).toContain('[^sn1]: line one\n    line two');
+        expect(out).toContain('[^1]: line one\n    line two');
     });
 
     it('generates non-colliding keys when footnotes already exist', () => {
-        const doc = 'Para with TARGET.\n\n[^sn1]: existing';
+        const doc = 'Para with TARGET.\n\n[^1]: existing';
         const out = processStandardFootnote(doc, 'TARGET', 'second', doc.indexOf('TARGET'));
-        expect(out).toContain('==TARGET==[^sn2]');
-        expect(out).toContain('[^sn2]: second');
+        expect(out).toContain('==TARGET==[^2]');
+        expect(out).toContain('[^2]: second');
     });
 });

@@ -464,11 +464,11 @@ export class InlineFootnoteManager {
         }
 
         let index = 1;
-        while (usedKeys.has(`sn${index}`)) {
+        while (usedKeys.has(`${index}`)) {
             index++;
         }
 
-        return `sn${index}`;
+        return `${index}`;
     }
 
     private createStandardFootnoteDefinition(content: string, key: string, footnoteContent: string): string {

@@ -1193,10 +1193,10 @@ export default class HighlightCommentsPlugin extends Plugin {
                     usedKeys.add(keyMatch[1]);
                 }
                 let keyIndex = 1;
-                while (usedKeys.has(`sn${keyIndex}`)) {
+                while (usedKeys.has(`${keyIndex}`)) {
                     keyIndex++;
                 }
-                const key = `sn${keyIndex}`;
+                const key = `${keyIndex}`;
 
                 // Insert the reference immediately after the wrapped mark.
                 const refInsertAt = replaceStart + replacement.length;
