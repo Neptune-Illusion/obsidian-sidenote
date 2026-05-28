@@ -8,6 +8,14 @@ export interface InlineFootnoteMatch {
     endIndex: number;
 }
 
+export interface StandardFootnoteInsertResult {
+    success: boolean;
+    referencePos?: { line: number, ch: number };
+    definitionContentPos?: { line: number, ch: number };
+    contentLength: number;
+    key?: string;
+}
+
 export class InlineFootnoteManager {
 
     /**
@@ -329,6 +337,159 @@ export class InlineFootnoteManager {
             insertPos: { line: insertPos.line, ch: insertPos.ch },
             contentLength: footnoteContent.length
         };
+    }
+
+    /**
+     * Inserts a standard footnote reference after a highlight and appends the
+     * definition at the end of the document, matching Obsidian footnote layout.
+     */
+    public insertStandardFootnote(editor: Editor, highlight: Highlight, footnoteContent: string): StandardFootnoteInsertResult {
+        const initialContent = editor.getValue();
+        const escapedText = this.escapeRegex(highlight.text);
+
+        let bestMatch: { index: number, length: number } | null = null;
+        let minDistance = Infinity;
+
+        if (highlight.type === 'custom' && highlight.fullMatch) {
+            const regexPattern = this.escapeRegex(highlight.fullMatch);
+            const highlightRegex = new RegExp(regexPattern, 'g');
+            let match;
+            while ((match = highlightRegex.exec(initialContent)) !== null) {
+                const distance = Math.abs(match.index - highlight.startOffset);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    bestMatch = { index: match.index, length: match[0].length };
+                }
+            }
+        } else if (highlight.isNativeComment) {
+            const htmlCommentPattern = `<!--\\s*${escapedText}\\s*-->`;
+            const htmlCommentRegex = new RegExp(htmlCommentPattern, 'g');
+            let match;
+            while ((match = htmlCommentRegex.exec(initialContent)) !== null) {
+                const distance = Math.abs(match.index - highlight.startOffset);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    bestMatch = { index: match.index, length: match[0].length };
+                }
+            }
+
+            if (!bestMatch) {
+                const regexPattern = `%%${escapedText}%%`;
+                const highlightRegex = new RegExp(regexPattern, 'g');
+                while ((match = highlightRegex.exec(initialContent)) !== null) {
+                    const distance = Math.abs(match.index - highlight.startOffset);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        bestMatch = { index: match.index, length: match[0].length };
+                    }
+                }
+            }
+        } else if (this.isHtmlHighlight(highlight)) {
+            const htmlHighlight = HtmlHighlightParser.findHighlightAtOffset(
+                initialContent,
+                highlight.text,
+                highlight.startOffset,
+                []
+            );
+
+            if (htmlHighlight) {
+                bestMatch = {
+                    index: htmlHighlight.startOffset,
+                    length: htmlHighlight.endOffset - htmlHighlight.startOffset
+                };
+            }
+        } else {
+            const syntax = this.getSidenoteMarkSyntax(highlight.markType || 'highlight');
+            const regexPattern = `${this.escapeRegex(syntax.prefix)}${escapedText}${this.escapeRegex(syntax.suffix)}`;
+            const highlightRegex = new RegExp(regexPattern, 'g');
+            let match;
+            while ((match = highlightRegex.exec(initialContent)) !== null) {
+                const distance = Math.abs(match.index - highlight.startOffset);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    bestMatch = { index: match.index, length: match[0].length };
+                }
+            }
+        }
+
+        if (!bestMatch) {
+            return { success: false, contentLength: footnoteContent.length };
+        }
+
+        let insertOffset = bestMatch.index + bestMatch.length;
+        const afterHighlight = initialContent.substring(insertOffset);
+        const newlineMatch = afterHighlight.match(/^[^\r\n]*/);
+        const restOfLine = newlineMatch ? newlineMatch[0] : '';
+
+        let footnoteEndLength = InlineFootnoteManager.calculateFootnoteLength(restOfLine);
+        if (footnoteEndLength > 0) {
+            const afterFootnotes = restOfLine.substring(footnoteEndLength);
+            const trailingSpacesMatch = afterFootnotes.match(/^[ \t]+/);
+            if (trailingSpacesMatch) {
+                const afterSpaces = afterFootnotes.substring(trailingSpacesMatch[0].length);
+                if (afterSpaces.length === 0) {
+                    footnoteEndLength += trailingSpacesMatch[0].length;
+                }
+            }
+        }
+        insertOffset += footnoteEndLength;
+
+        const key = this.getNextStandardFootnoteKey(initialContent);
+        const referenceText = `[^${key}]`;
+        const referencePos = editor.offsetToPos(insertOffset);
+        editor.replaceRange(referenceText, referencePos);
+
+        const contentAfterReference = editor.getValue();
+        const definitionText = this.createStandardFootnoteDefinition(contentAfterReference, key, footnoteContent);
+        const definitionContentOffset = contentAfterReference.length + definitionText.indexOf(': ') + 2;
+        const documentEndPos = editor.offsetToPos(contentAfterReference.length);
+        editor.replaceRange(definitionText, documentEndPos);
+
+        return {
+            success: true,
+            referencePos,
+            definitionContentPos: editor.offsetToPos(definitionContentOffset),
+            contentLength: footnoteContent.length,
+            key
+        };
+    }
+
+    private getNextStandardFootnoteKey(content: string): string {
+        const usedKeys = new Set<string>();
+        const footnoteRegex = /\[\^([a-zA-Z0-9_]+)\]/g;
+        let match;
+
+        while ((match = footnoteRegex.exec(content)) !== null) {
+            usedKeys.add(match[1]);
+        }
+
+        let index = 1;
+        while (usedKeys.has(`sn${index}`)) {
+            index++;
+        }
+
+        return `sn${index}`;
+    }
+
+    private createStandardFootnoteDefinition(content: string, key: string, footnoteContent: string): string {
+        let prefix = '';
+        if (content.length > 0) {
+            if (/\n\s*\n$/.test(content)) {
+                prefix = '';
+            } else if (/\n$/.test(content)) {
+                prefix = '\n';
+            } else {
+                prefix = '\n\n';
+            }
+        }
+
+        const definitionContent = footnoteContent
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .split('\n')
+            .join('\n    ');
+
+        return `${prefix}[^${key}]: ${definitionContent}`;
     }
     
     /**

@@ -1139,10 +1139,28 @@ export default class HighlightCommentsPlugin extends Plugin {
 
     private async addSidenoteCommentToSelection(editor: Editor, file: TFile, selectedText: string, comment: string, color?: string, markType: Highlight['markType'] = 'highlight') {
         const fromCursor = editor.getCursor('from');
-        const toCursor = editor.getCursor('to');
         const syntax = this.getSidenoteMarkSyntax(markType);
-        const wrapped = `${syntax.prefix}${selectedText}${syntax.suffix}${comment.trim() ? `^[${comment.trim()}]` : ''}`;
+        const trimmedComment = comment.trim();
+        const wrapped = `${syntax.prefix}${selectedText}${syntax.suffix}${this.settings.useInlineFootnotes && trimmedComment ? `^[${trimmedComment}]` : ''}`;
         editor.replaceSelection(wrapped);
+
+        if (!this.settings.useInlineFootnotes && trimmedComment) {
+            const insertedOffset = editor.posToOffset(fromCursor);
+            const insertedHighlight: Highlight = {
+                id: this.generateId(),
+                text: selectedText,
+                tags: [],
+                line: fromCursor.line,
+                startOffset: insertedOffset,
+                endOffset: insertedOffset + wrapped.length,
+                filePath: file.path,
+                markType
+            };
+            const result = this.inlineFootnoteManager.insertStandardFootnote(editor, insertedHighlight, trimmedComment);
+            if (!result.success) {
+                new Notice('Could not insert footnote.');
+            }
+        }
 
         const content = editor.getValue();
         this.detectAndStoreMarkdownHighlights(content, file);
@@ -3167,12 +3185,12 @@ export default class HighlightCommentsPlugin extends Plugin {
 
     extractFootnotes(content: string): Map<string, string> {
         const footnoteMap = new Map<string, string>();
-        const footnoteRegex = /^\[\^(\w+)\]:\s*(.+)$/gm;
+        const footnoteRegex = /^\[\^(\w+)\]:[ \t]*(.*(?:\r?\n[ \t]+.*)*)/gm;
         let match;
         
         while ((match = footnoteRegex.exec(content)) !== null) {
             const [, key, footnoteContent] = match;
-            footnoteMap.set(key, footnoteContent.trim());
+            footnoteMap.set(key, footnoteContent.replace(/\r?\n[ \t]+/g, '\n').trim());
         }
         
         return footnoteMap;

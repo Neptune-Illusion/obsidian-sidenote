@@ -512,6 +512,86 @@ describe('InlineFootnoteManager', () => {
         });
     });
 
+    describe('insertStandardFootnote', () => {
+        it('should append the footnote definition to the end of the document', () => {
+            const editor = new MockEditor('Paragraph with ==highlighted text== here.\n\nNext paragraph.');
+            const highlight = {
+                id: '1',
+                text: 'highlighted text',
+                startOffset: 15,
+                endOffset: 35,
+                line: 0,
+                tags: [],
+                filePath: 'test.md',
+                isNativeComment: false
+            };
+
+            const result = manager.insertStandardFootnote(editor as any, highlight, 'my comment');
+
+            expect(result.success).toBe(true);
+            expect(result.key).toBe('sn1');
+            expect(editor.getValue()).toBe('Paragraph with ==highlighted text==[^sn1] here.\n\nNext paragraph.\n\n[^sn1]: my comment');
+        });
+
+        it('should keep table syntax intact and place the definition after the table', () => {
+            const editor = new MockEditor('| A | B |\n| - | - |\n| ==cell== | value |\n\nAfter table.');
+            const highlight = {
+                id: '1',
+                text: 'cell',
+                startOffset: 24,
+                endOffset: 32,
+                line: 2,
+                tags: [],
+                filePath: 'test.md',
+                isNativeComment: false
+            };
+
+            const result = manager.insertStandardFootnote(editor as any, highlight, 'table comment');
+
+            expect(result.success).toBe(true);
+            expect(editor.getValue()).toBe('| A | B |\n| - | - |\n| ==cell==[^sn1] | value |\n\nAfter table.\n\n[^sn1]: table comment');
+        });
+
+        it('should generate a unique standard footnote key', () => {
+            const editor = new MockEditor('==text==\n\n[^sn1]: existing');
+            const highlight = {
+                id: '1',
+                text: 'text',
+                startOffset: 0,
+                endOffset: 8,
+                line: 0,
+                tags: [],
+                filePath: 'test.md',
+                isNativeComment: false
+            };
+
+            const result = manager.insertStandardFootnote(editor as any, highlight, 'new');
+
+            expect(result.success).toBe(true);
+            expect(result.key).toBe('sn2');
+            expect(editor.getValue()).toBe('==text==[^sn2]\n\n[^sn1]: existing\n\n[^sn2]: new');
+        });
+
+        it('should indent multiline standard footnote definitions', () => {
+            const editor = new MockEditor('==text==');
+            const highlight = {
+                id: '1',
+                text: 'text',
+                startOffset: 0,
+                endOffset: 8,
+                line: 0,
+                tags: [],
+                filePath: 'test.md',
+                isNativeComment: false
+            };
+
+            const result = manager.insertStandardFootnote(editor as any, highlight, 'line one\nline two');
+
+            expect(result.success).toBe(true);
+            expect(editor.getValue()).toBe('==text==[^sn1]\n\n[^sn1]: line one\n    line two');
+        });
+    });
+
     describe('calculateFootnoteLength', () => {
         it('should calculate single footnote length', () => {
             const text = '^[comment] after';
