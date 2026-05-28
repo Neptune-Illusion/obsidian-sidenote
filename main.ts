@@ -839,6 +839,7 @@ export default class HighlightCommentsPlugin extends Plugin {
             constructor(private view: EditorView) {
                 this.decorations = this.buildDecorations();
                 this.view.dom.addEventListener('click', this.handleClick);
+                this.syncNativeMarkStyles();
             }
 
             update(update: ViewUpdate) {
@@ -851,6 +852,7 @@ export default class HighlightCommentsPlugin extends Plugin {
 
                 if (shouldRefresh) {
                     this.decorations = this.buildDecorations();
+                    this.syncNativeMarkStyles();
                 }
             }
 
@@ -902,6 +904,60 @@ export default class HighlightCommentsPlugin extends Plugin {
                 }
 
                 return Decoration.set(ranges, true);
+            }
+
+            private syncNativeMarkStyles() {
+                window.requestAnimationFrame(() => {
+                    const markEls = Array.from(this.view.dom.querySelectorAll<HTMLElement>('.sidenote-highlight'));
+
+                    for (const markEl of markEls) {
+                        const highlightId = markEl.getAttribute('data-highlight-id');
+                        const filePath = plugin.getFilePathForEditorView(this.view);
+                        const highlight = filePath && highlightId
+                            ? (plugin.highlights.get(filePath) || []).find(h => h.id === highlightId)
+                            : undefined;
+                        const style = highlight ? plugin.getSidenoteDecorationStyle(highlight) : '';
+                        if (style) markEl.setAttr('style', style);
+
+                        if (markEl.hasClass('sidenote-mark-underline')) {
+                            this.applyNativeDecorationColor(markEl, 'underline', 'u, .cm-underline');
+                        } else if (markEl.hasClass('sidenote-mark-strikethrough')) {
+                            this.applyNativeDecorationColor(markEl, 'line-through', '.cm-strikethrough, del, s');
+                        }
+                    }
+                });
+            }
+
+            private applyNativeDecorationColor(markEl: HTMLElement, line: 'underline' | 'line-through', selector: string) {
+                const color = markEl.style.getPropertyValue('--sidenote-highlight-border') || 'rgba(255, 208, 0, 0.6)';
+                const candidates = new Set<HTMLElement>();
+
+                const closest = markEl.closest(selector) as HTMLElement | null;
+                if (closest) candidates.add(closest);
+
+                markEl.querySelectorAll<HTMLElement>(selector).forEach(el => candidates.add(el));
+                this.collectDecoratedAncestors(markEl, line, candidates);
+
+                for (const el of candidates) {
+                    el.style.setProperty('text-decoration-line', line, 'important');
+                    el.style.setProperty('text-decoration-color', color, 'important');
+                    el.style.setProperty('text-decoration-thickness', '2px', 'important');
+                    if (line === 'underline') {
+                        el.style.setProperty('text-underline-offset', '0.12em', 'important');
+                    }
+                }
+            }
+
+            private collectDecoratedAncestors(markEl: HTMLElement, line: 'underline' | 'line-through', candidates: Set<HTMLElement>) {
+                let el = markEl.parentElement;
+
+                while (el && el !== this.view.dom && !el.hasClass('cm-line')) {
+                    const decorationLine = window.getComputedStyle(el).textDecorationLine;
+                    if (decorationLine.split(/\s+/).includes(line)) {
+                        candidates.add(el);
+                    }
+                    el = el.parentElement;
+                }
             }
         }, {
             decorations: value => value.decorations
