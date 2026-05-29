@@ -1145,21 +1145,39 @@ export default class HighlightCommentsPlugin extends Plugin {
         editor.replaceSelection(wrapped);
 
         if (!this.settings.useInlineFootnotes && trimmedComment) {
-            const insertedOffset = editor.posToOffset(fromCursor);
-            const insertedHighlight: Highlight = {
-                id: this.generateId(),
-                text: selectedText,
-                tags: [],
-                line: fromCursor.line,
-                startOffset: insertedOffset,
-                endOffset: insertedOffset + wrapped.length,
-                filePath: file.path,
-                markType
-            };
-            const result = this.inlineFootnoteManager.insertStandardFootnote(editor, insertedHighlight, trimmedComment);
-            if (!result.success) {
-                new Notice('Could not insert footnote.');
+            // Generate unique footnote key
+            const currentContent = editor.getValue();
+            const usedKeys = new Set<string>();
+            const footnoteKeyRegex = /\[\^([a-zA-Z0-9_]+)\]/g;
+            let keyMatch;
+            while ((keyMatch = footnoteKeyRegex.exec(currentContent)) !== null) {
+                usedKeys.add(keyMatch[1]);
             }
+            let keyIndex = 1;
+            while (usedKeys.has(`sn${keyIndex}`)) {
+                keyIndex++;
+            }
+            const key = `sn${keyIndex}`;
+
+            // Insert reference at current cursor position (right after the wrapped text)
+            const cursorPos = editor.getCursor();
+            editor.replaceRange(`[^${key}]`, cursorPos);
+
+            // Append definition at the end of the document
+            const updatedContent = editor.getValue();
+            const endPos = editor.offsetToPos(updatedContent.length);
+            let prefix = '\n\n';
+            if (/\n\s*\n$/.test(updatedContent)) {
+                prefix = '';
+            } else if (/\n$/.test(updatedContent)) {
+                prefix = '\n';
+            }
+            const definitionContent = trimmedComment
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .split('\n')
+                .join('\n    ');
+            editor.replaceRange(`${prefix}[^${key}]: ${definitionContent}`, endPos);
         }
 
         const content = editor.getValue();

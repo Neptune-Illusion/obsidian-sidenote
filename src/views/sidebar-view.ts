@@ -4760,17 +4760,16 @@ export class HighlightsSidebarView extends ItemView {
                 new Notice('Could not insert inline footnote.');
             }
         } else {
-            const result = this.plugin.inlineFootnoteManager.insertStandardFootnote(editor, highlight, '');
-            if (result.success && result.definitionContentPos) {
-                editor.setCursor(result.definitionContentPos);
-                editor.focus();
+            // Use standard footnote
+            // Position cursor at the end of the highlight for the footnote command
+            editor.setCursor(insertPos);
+            editor.focus();
 
-                setTimeout(async () => {
-                    await this.updateSingleHighlightFromEditor(highlight, file);
-                }, 100);
-            } else {
-                new Notice('Could not insert footnote.');
-            }
+            (this.plugin.app as any).commands.executeCommandById('editor:insert-footnote');
+            // Wait for the footnote command to complete
+            setTimeout(async () => {
+                await this.updateSingleHighlightFromEditor(highlight, file);
+            }, 100);
         }
     }
 
