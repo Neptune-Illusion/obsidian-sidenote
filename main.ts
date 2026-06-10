@@ -236,6 +236,8 @@ export default class HighlightCommentsPlugin extends Plugin {
     public collectionCommands: Set<string> = new Set(); // Track registered collection commands
     private isScanningFiles: boolean = false; // Prevent concurrent scans
     private livePreviewTooltipEl: HTMLElement | null = null;
+    private livePreviewTooltipComponent: Component | null = null;
+    private readingTooltipComponent: Component | null = null;
 
     async onload() {
         await this.loadSettings();
@@ -502,6 +504,29 @@ export default class HighlightCommentsPlugin extends Plugin {
             this.ribbonIconEl = null;
         }
 
+        // Cancel the debounced highlight detection so it can't run after unload.
+        if (this.detectHighlightsTimeout) {
+            window.clearTimeout(this.detectHighlightsTimeout);
+            this.detectHighlightsTimeout = null;
+        }
+
+        if ('unregisterHoverLinkSource' in this.app.workspace) {
+            (this.app.workspace as any).unregisterHoverLinkSource(HOVER_SOURCE_SIDENOTE);
+        }
+
+        // Remove the injected style element and CSS custom properties.
+        this.removeStyles();
+
+        // Remove any floating UI attached to document.body (selection toolbar,
+        // hover tooltips, floating comment input). These are position:fixed
+        // overlays — anything left behind would float over the workspace with
+        // no owner until the app is restarted.
+        this.hideLivePreviewTooltip();
+        this.hideReadingModeTooltip();
+        document
+            .querySelectorAll('.sidenote-selection-toolbar, .sidenote-tooltip, .sidenote-floating-container')
+            .forEach(el => el.remove());
+
         // Cleanup is mostly automatic due to using registerEvent() and addCommand()
         // The sidebar view's onClose() method will handle its own cleanup
         // Obsidian automatically handles:
@@ -509,9 +534,6 @@ export default class HighlightCommentsPlugin extends Plugin {
         // - Registered commands (this.addCommand)
         // - Settings tab removal
         // - View unregistration
-        
-        // Only manual cleanup needed is for any direct DOM listeners or intervals
-        // which we don't currently have in the main plugin file
     }
 
     async loadSettings() {
@@ -755,15 +777,56 @@ export default class HighlightCommentsPlugin extends Plugin {
         const plugin = this;
         return ViewPlugin.fromClass(class {
             toolbarEl: HTMLElement | null = null;
+            private updateTimeout: number | null = null;
+            private destroyed = false;
+            // Set when the user clicks outside the toolbar and editor — keeps
+            // the toolbar hidden (despite the still-active selection) until the
+            // user actively changes the selection again.
+            private dismissed = false;
+            // Dismiss the toolbar when the user clicks anywhere outside it and
+            // outside this editor (other panes, sidebar, ...). Clicks inside the
+            // editor are handled by the selection update; clicks on the toolbar
+            // must keep it open. Capture phase so handlers that call
+            // stopPropagation() can't leave the toolbar stuck on screen.
+            private onDocPointerDown = (event: PointerEvent) => {
+                const target = event.target as Node | null;
+                if (!target) return;
+                if (this.toolbarEl?.contains(target) || this.view.dom.contains(target)) return;
+                this.dismissed = true;
+                this.hideToolbar();
+            };
+
             constructor(private view: any) {}
 
             update(update: any) {
-                if (update.selectionSet || update.docChanged || update.viewportChanged) {
-                    window.setTimeout(() => this.updateToolbar(), 20);
+                if (update.selectionSet) this.dismissed = false;
+
+                // Feature off and nothing visible — don't schedule timers.
+                if (!plugin.settings.enableSelectionToolbar && !this.toolbarEl) return;
+                // No selection and no toolbar to hide: skip the timer churn that
+                // plain typing / cursor movement would otherwise cause.
+                if (update.state.selection.main.empty && !this.toolbarEl) return;
+
+                const hasRefreshEffect = update.transactions.some((transaction: any) =>
+                    transaction.effects.some((effect: any) => effect.is(REFRESH_SIDENOTE_DECORATIONS))
+                );
+                if (update.selectionSet || update.docChanged || update.viewportChanged || hasRefreshEffect) {
+                    // Debounce: rapid updates (drag-select, scrolling) coalesce
+                    // into one refresh instead of stacking timers.
+                    if (this.updateTimeout !== null) window.clearTimeout(this.updateTimeout);
+                    this.updateTimeout = window.setTimeout(() => {
+                        this.updateTimeout = null;
+                        this.updateToolbar();
+                    }, 20);
                 }
             }
 
             updateToolbar() {
+                // The view plugin may have been destroyed while this update was
+                // pending (file switch, view mode change). Never (re)create the
+                // toolbar afterwards — it would be orphaned on document.body.
+                if (this.destroyed) return;
+
                 if (!plugin.settings.enableSelectionToolbar) {
                     this.hideToolbar();
                     return;
@@ -781,9 +844,27 @@ export default class HighlightCommentsPlugin extends Plugin {
                     return;
                 }
 
+                // Dismissed by an outside click — stay hidden until the user
+                // changes the selection (scrolling alone must not resurrect it).
+                if (this.dismissed) {
+                    this.hideToolbar();
+                    return;
+                }
+
+                // Resolve coordinates BEFORE creating the toolbar so we never
+                // leave an unpositioned toolbar behind (e.g. the selection
+                // scrolled out of the viewport).
+                const endCoords = this.view.coordsAtPos(selection.to);
+                const startCoords = this.view.coordsAtPos(selection.from);
+                if (!endCoords || !startCoords) {
+                    this.hideToolbar();
+                    return;
+                }
+
                 if (!this.toolbarEl) {
                     this.toolbarEl = document.body.createDiv({ cls: 'sidenote-selection-toolbar' });
                     this.toolbarEl.addEventListener('mousedown', (event) => event.preventDefault());
+                    document.addEventListener('pointerdown', this.onDocPointerDown, true);
                     const colorInput = this.toolbarEl.createEl('input', {
                         type: 'color',
                         cls: 'sidenote-toolbar-color-picker'
@@ -812,19 +893,22 @@ export default class HighlightCommentsPlugin extends Plugin {
                     this.toolbarEl.appendChild(colorInput);
                 }
 
-                const endCoords = this.view.coordsAtPos(selection.to);
-                const startCoords = this.view.coordsAtPos(selection.from);
-                if (!endCoords || !startCoords) return;
                 this.toolbarEl.style.left = `${Math.max(8, (startCoords.left + endCoords.left) / 2)}px`;
                 this.toolbarEl.style.top = `${Math.max(8, Math.min(startCoords.top, endCoords.top) - 42)}px`;
             }
 
             hideToolbar() {
+                document.removeEventListener('pointerdown', this.onDocPointerDown, true);
                 this.toolbarEl?.remove();
                 this.toolbarEl = null;
             }
 
             destroy() {
+                this.destroyed = true;
+                if (this.updateTimeout !== null) {
+                    window.clearTimeout(this.updateTimeout);
+                    this.updateTimeout = null;
+                }
                 this.hideToolbar();
             }
         });
@@ -849,15 +933,17 @@ export default class HighlightCommentsPlugin extends Plugin {
             }
 
             update(update: ViewUpdate) {
-                const shouldRefresh =
-                    update.docChanged ||
-                    update.viewportChanged ||
-                    update.transactions.some(transaction =>
-                        transaction.effects.some(effect => effect.is(REFRESH_SIDENOTE_DECORATIONS))
-                    );
+                const hasRefreshEffect = update.transactions.some(transaction =>
+                    transaction.effects.some(effect => effect.is(REFRESH_SIDENOTE_DECORATIONS))
+                );
 
-                if (shouldRefresh) {
+                if (update.docChanged || hasRefreshEffect) {
                     this.decorations = this.buildDecorations();
+                    this.syncNativeMarkStyles();
+                } else if (update.viewportChanged) {
+                    // Decorations are doc-offset based and unaffected by pure
+                    // scrolling, but scrolling mounts new line DOM whose native
+                    // mark styles still need syncing.
                     this.syncNativeMarkStyles();
                 }
             }
@@ -888,7 +974,9 @@ export default class HighlightCommentsPlugin extends Plugin {
                     return Decoration.set([]);
                 }
 
-                const content = this.view.state.doc.toString();
+                // Slice only the ranges we inspect instead of stringifying the
+                // whole document on every update.
+                const sliceDoc = (from: number, to: number) => this.view.state.sliceDoc(from, to);
                 const docLength = this.view.state.doc.length;
                 const ranges: any[] = [];
                 const highlights = plugin.highlights.get(filePath) || [];
@@ -896,7 +984,7 @@ export default class HighlightCommentsPlugin extends Plugin {
                 for (const highlight of highlights) {
                     if (highlight.isNativeComment) continue;
 
-                    const range = plugin.getEditorDecorationRange(highlight, content, docLength);
+                    const range = plugin.getEditorDecorationRange(highlight, sliceDoc, docLength);
                     if (!range) continue;
 
                     const markType = highlight.markType || 'highlight';
@@ -925,11 +1013,13 @@ export default class HighlightCommentsPlugin extends Plugin {
                     this.syncRenderedUnderlineElements(highlights);
 
                     const markEls = Array.from(this.view.dom.querySelectorAll<HTMLElement>('.sidenote-highlight'));
+                    if (markEls.length === 0) return;
 
+                    const highlightsById = new Map(highlights.map(h => [h.id, h]));
                     for (const markEl of markEls) {
                         const highlightId = markEl.getAttribute('data-highlight-id');
                         const highlight = highlightId
-                            ? highlights.find(h => h.id === highlightId)
+                            ? highlightsById.get(highlightId)
                             : undefined;
                         if (highlight) this.applySidenoteStyleProperties(markEl, highlight);
 
@@ -1032,7 +1122,7 @@ export default class HighlightCommentsPlugin extends Plugin {
         return filePath;
     }
 
-    private getEditorDecorationRange(highlight: Highlight, content: string, docLength: number): { from: number; to: number } | null {
+    private getEditorDecorationRange(highlight: Highlight, sliceDoc: (from: number, to: number) => string, docLength: number): { from: number; to: number } | null {
         let from = highlight.startOffset;
         let to = highlight.endOffset;
 
@@ -1040,7 +1130,7 @@ export default class HighlightCommentsPlugin extends Plugin {
             return null;
         }
 
-        const slice = content.substring(from, to);
+        const slice = sliceDoc(from, to);
         if (!slice.includes(highlight.text)) {
             return null;
         }
@@ -1252,13 +1342,18 @@ export default class HighlightCommentsPlugin extends Plugin {
             ...Array.from(containerEl.querySelectorAll('u')).map(el => ({ el: el as HTMLElement, markType: 'underline' as Highlight['markType'] }))
         ];
 
+        // Index highlights by mark type + text once, instead of a linear scan
+        // per rendered element. Keeps the first match, like .find() did.
+        const highlightsByTypeAndText = new Map<string, Highlight>();
+        for (const h of highlights) {
+            if (h.isNativeComment) continue;
+            const key = `${h.markType || 'highlight'} ${h.text.trim()}`;
+            if (!highlightsByTypeAndText.has(key)) highlightsByTypeAndText.set(key, h);
+        }
+
         for (const { el: markEl, markType } of renderedMarks) {
             const text = (markEl.textContent || '').trim();
-            const highlight = highlights.find(h =>
-                !h.isNativeComment &&
-                (h.markType || 'highlight') === (markType || 'highlight') &&
-                h.text.trim() === text
-            );
+            const highlight = highlightsByTypeAndText.get(`${markType || 'highlight'} ${text}`);
             if (!highlight) continue;
 
             markEl.addClass('sidenote-reading-highlight');
@@ -1289,20 +1384,30 @@ export default class HighlightCommentsPlugin extends Plugin {
     private async showReadingModeTooltip(targetEl: HTMLElement, highlight: Highlight, event: MouseEvent) {
         this.hideReadingModeTooltip();
 
-        const tooltipEl = document.body.createDiv({ cls: 'sidenote-tooltip sidenote-reading-tooltip' });
+        // Tag the element at creation so hideReadingModeTooltip() can remove it
+        // even while the markdown below is still rendering (mouseleave race).
+        const tooltipEl = document.body.createDiv({
+            cls: 'sidenote-tooltip sidenote-reading-tooltip',
+            attr: { 'data-sidenote-reading-tooltip': 'true' }
+        });
         const contentEl = tooltipEl.createDiv({ cls: 'sidenote-tooltip-content markdown-rendered' });
         const comments = highlight.footnoteContents?.filter(content => content.trim() !== '') || [];
 
         if (comments.length > 0) {
             const component = new Component();
             component.load();
-            this.register(() => component.unload());
+            this.readingTooltipComponent = component;
             await MarkdownRenderer.renderMarkdown(comments.join('\n\n---\n\n'), contentEl, highlight.filePath, component);
+            // Hidden (or replaced) while rendering — don't resurrect it.
+            if (!tooltipEl.isConnected) {
+                component.unload();
+                if (this.readingTooltipComponent === component) this.readingTooltipComponent = null;
+                return;
+            }
         } else {
             contentEl.setText(highlight.text);
         }
 
-        tooltipEl.setAttr('data-sidenote-reading-tooltip', 'true');
         const rect = targetEl.getBoundingClientRect();
         const top = Math.min(window.innerHeight - tooltipEl.offsetHeight - 12, rect.bottom + 8);
         const left = Math.min(window.innerWidth - tooltipEl.offsetWidth - 12, Math.max(12, event.clientX));
@@ -1311,6 +1416,8 @@ export default class HighlightCommentsPlugin extends Plugin {
     }
 
     private hideReadingModeTooltip() {
+        this.readingTooltipComponent?.unload();
+        this.readingTooltipComponent = null;
         document.querySelectorAll('[data-sidenote-reading-tooltip="true"]').forEach(el => el.remove());
     }
 
@@ -1339,7 +1446,9 @@ export default class HighlightCommentsPlugin extends Plugin {
         const related = event.relatedTarget as HTMLElement | null;
         if (related?.closest('.sidenote-tooltip')) return;
         const target = event.target as HTMLElement;
-        if (target.closest('.markdown-source-view.mod-cm6 .cm-highlight, .markdown-source-view.mod-cm6 .sidenote-highlight')) {
+        if (target.closest('.markdown-source-view.mod-cm6 .cm-highlight, .markdown-source-view.mod-cm6 .sidenote-highlight') ||
+            target.closest('.sidenote-tooltip')) {
+            // Leaving either the mark or the tooltip itself hides the tooltip.
             this.hideLivePreviewTooltip();
         }
     }
@@ -1351,18 +1460,29 @@ export default class HighlightCommentsPlugin extends Plugin {
         const contentEl = tooltipEl.createDiv({ cls: 'sidenote-tooltip-content markdown-rendered' });
         const component = new Component();
         component.load();
-        this.register(() => component.unload());
+        // Track BEFORE the async render so hideLivePreviewTooltip() can remove
+        // the tooltip even while the markdown is still rendering (mouseout race).
+        this.livePreviewTooltipEl = tooltipEl;
+        this.livePreviewTooltipComponent = component;
         await MarkdownRenderer.renderMarkdown(comments.join('\n\n---\n\n'), contentEl, sourcePath, component);
+
+        // A newer tooltip (or a hide) replaced this one while rendering.
+        if (this.livePreviewTooltipEl !== tooltipEl) {
+            component.unload();
+            tooltipEl.remove();
+            return;
+        }
 
         const rect = targetEl.getBoundingClientRect();
         const top = Math.min(window.innerHeight - tooltipEl.offsetHeight - 12, rect.bottom + 8);
         const left = Math.min(window.innerWidth - tooltipEl.offsetWidth - 12, Math.max(12, event.clientX));
         tooltipEl.style.top = `${Math.max(12, top)}px`;
         tooltipEl.style.left = `${left}px`;
-        this.livePreviewTooltipEl = tooltipEl;
     }
 
     private hideLivePreviewTooltip() {
+        this.livePreviewTooltipComponent?.unload();
+        this.livePreviewTooltipComponent = null;
         this.livePreviewTooltipEl?.remove();
         this.livePreviewTooltipEl = null;
     }

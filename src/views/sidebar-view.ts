@@ -75,6 +75,7 @@ export class HighlightsSidebarView extends ItemView {
 
     // Follow-editor-scroll: scroll the sidebar to track the editor's visible position
     private followEditorScroll: boolean = false;
+    private followScrollAttachTimeout: number | null = null;
     private editorScrollCleanup: (() => void) | null = null;
     private followScrollDebounce: number | null = null;
     private followScrollSelectedId: string | null = null;
@@ -716,7 +717,7 @@ export class HighlightsSidebarView extends ItemView {
 
             // Add toggle native comments button (positioned after sort button)
             const nativeCommentsToggleButton = searchContainer.createEl('button', {
-                cls: 'highlights-group-button'
+                cls: 'highlights-group-button highlights-native-comments-button'
             });
             setTooltip(nativeCommentsToggleButton, t('toolbar.toggleComments'));
             this.updateNativeCommentsToggleState(nativeCommentsToggleButton);
@@ -829,7 +830,8 @@ export class HighlightsSidebarView extends ItemView {
         let currentNoteTab: HTMLElement | null = null;
         if (this.plugin.settings.showCurrentNoteTab) {
             currentNoteTab = tabsContainer.createEl('button', {
-                cls: 'highlights-tab' + (!defaultActive ? ' active' : '')
+                cls: 'highlights-tab' + (!defaultActive ? ' active' : ''),
+                attr: { 'data-tab': 'current' }
             });
             setIcon(currentNoteTab, 'file-text');
             setTooltip(currentNoteTab, t('tabs.currentNote'));
@@ -842,7 +844,8 @@ export class HighlightsSidebarView extends ItemView {
         let allNotesTab: HTMLElement | null = null;
         if (this.plugin.settings.showAllNotesTab) {
             allNotesTab = tabsContainer.createEl('button', {
-                cls: 'highlights-tab' + (!defaultActive ? ' active' : '')
+                cls: 'highlights-tab' + (!defaultActive ? ' active' : ''),
+                attr: { 'data-tab': 'all' }
             });
             setIcon(allNotesTab, 'files');
             setTooltip(allNotesTab, t('tabs.allNotes'));
@@ -855,7 +858,8 @@ export class HighlightsSidebarView extends ItemView {
         let collectionsTab: HTMLElement | null = null;
         if (this.plugin.settings.showCollectionsTab) {
             collectionsTab = tabsContainer.createEl('button', {
-                cls: 'highlights-tab' + (!defaultActive ? ' active' : '')
+                cls: 'highlights-tab' + (!defaultActive ? ' active' : ''),
+                attr: { 'data-tab': 'collections' }
             });
             setIcon(collectionsTab, 'folder-open');
             setTooltip(collectionsTab, t('tabs.collections'));
@@ -868,7 +872,8 @@ export class HighlightsSidebarView extends ItemView {
         let tasksTab: HTMLElement | null = null;
         if (this.plugin.settings.showTasksTab) {
             tasksTab = tabsContainer.createEl('button', {
-                cls: 'highlights-tab' + (!defaultActive ? ' active' : '')
+                cls: 'highlights-tab' + (!defaultActive ? ' active' : ''),
+                attr: { 'data-tab': 'tasks' }
             });
             setIcon(tasksTab, 'circle-check');
             setTooltip(tasksTab, t('tabs.tasks'));
@@ -1053,10 +1058,7 @@ export class HighlightsSidebarView extends ItemView {
         // now the "active" leaf).
         const reevaluateFollowScroll = () => {
             if (!this.followEditorScroll) return;
-            window.setTimeout(() => {
-                this.attachEditorScrollListener();
-                this.syncSidebarToEditorScroll();
-            }, 50);
+            this.scheduleFollowScrollAttach();
         };
         this.registerEvent(this.app.workspace.on('active-leaf-change', reevaluateFollowScroll));
         this.registerEvent(this.app.workspace.on('layout-change', reevaluateFollowScroll));
@@ -1071,11 +1073,21 @@ export class HighlightsSidebarView extends ItemView {
 
         // If follow-editor-scroll was previously on, attach the scroll listener now
         if (this.followEditorScroll) {
-            window.setTimeout(() => {
-                this.attachEditorScrollListener();
-                this.syncSidebarToEditorScroll();
-            }, 50);
+            this.scheduleFollowScrollAttach();
         }
+    }
+
+    // Deferred follow-scroll attach, tracked so a pending attach can't fire
+    // after the view closes and leave a scroll listener on the editor.
+    private scheduleFollowScrollAttach() {
+        if (this.followScrollAttachTimeout != null) {
+            window.clearTimeout(this.followScrollAttachTimeout);
+        }
+        this.followScrollAttachTimeout = window.setTimeout(() => {
+            this.followScrollAttachTimeout = null;
+            this.attachEditorScrollListener();
+            this.syncSidebarToEditorScroll();
+        }, 50);
     }
 
     async onClose() {
@@ -1085,7 +1097,15 @@ export class HighlightsSidebarView extends ItemView {
         // Clean up editor scroll listener
         this.detachEditorScrollListener();
 
-        // Reset flags
+        // Cancel pending debounced work so it can't run against a closed view
+        if (this.taskRefreshTimeout) {
+            window.clearTimeout(this.taskRefreshTimeout);
+            this.taskRefreshTimeout = undefined;
+        }
+        if (this.followScrollAttachTimeout != null) {
+            window.clearTimeout(this.followScrollAttachTimeout);
+            this.followScrollAttachTimeout = null;
+        }
 
         // Clear maps to free memory
         this.highlightCommentsVisible.clear();
@@ -1106,22 +1126,12 @@ export class HighlightsSidebarView extends ItemView {
         this.viewMode = 'collections';
         this.currentCollectionId = collectionId;
         
-        // Update the tab state to show collections tab as active
-        // Get tabs by their order since they don't have data-tab attributes
-        const tabs = this.contentEl.querySelectorAll('.highlights-tab');
-        if (tabs.length >= 3) {
-            const currentNoteTab = tabs[0] as HTMLElement;  // First tab
-            const allNotesTab = tabs[1] as HTMLElement;     // Second tab  
-            const collectionsTab = tabs[2] as HTMLElement;  // Third tab
-            
-            // Remove active class from all tabs
-            currentNoteTab.classList.remove('active');
-            allNotesTab.classList.remove('active');
-            collectionsTab.classList.remove('active');
-            
-            // Add active class to collections tab
-            collectionsTab.classList.add('active');
-        }
+        // Update the tab state to show collections tab as active. Tabs are
+        // looked up by data-tab because they are conditionally created —
+        // positional indices shift when tabs are hidden in settings.
+        this.contentEl.querySelectorAll('.highlights-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.getAttribute('data-tab') === 'collections');
+        });
 
         // Clear any tag filters
         this.selectedTags.clear();
@@ -6658,19 +6668,20 @@ export class HighlightsSidebarView extends ItemView {
         }
 
         // Enable toolbar buttons (except collection nav button which should always be enabled in collections view)
+        // Identify buttons by reference/class — positional indices break as soon
+        // as buttons are added, removed, or reordered.
         const toolbarButtons = this.contentEl.querySelectorAll('.highlights-search-container button');
-        toolbarButtons.forEach((button, index) => {
-            const isCollectionNavButton = index === toolbarButtons.length - 1; // Last button
-            // Button order: 0=search, 1=group, 2=sort, 3=native comments, 4=comments, 5=reset colors
-            const isNativeCommentsToggle = index === 3; // Native comments toggle is the 4th button (index 3)
-            const isCommentsToggle = index === 4; // Comments toggle is the 5th button (index 4)
-            const isResetColors = index === 5; // Reset colors is the 6th button (index 5)
+        toolbarButtons.forEach((button) => {
+            const isCollectionNavButton = button === this.collectionNavButton;
+            const isNativeCommentsToggle = button.classList.contains('highlights-native-comments-button');
+            const isCommentsToggle = button === this.commentsToggleButton;
+            const isTagFilter = button.classList.contains('highlights-tag-filter-button');
 
             if (this.viewMode === 'collections' && !this.currentCollectionId && !isCollectionNavButton && !isNativeCommentsToggle) {
                 // In collections overview, disable all buttons except collection nav and native comments toggle
                 button.classList.add('disabled');
-            } else if (this.viewMode === 'tasks' && (isNativeCommentsToggle || isCommentsToggle || isResetColors)) {
-                // In tasks view, disable comment and color buttons
+            } else if (this.viewMode === 'tasks' && (isNativeCommentsToggle || isCommentsToggle || isTagFilter)) {
+                // In tasks view, disable comment and tag filter buttons
                 button.classList.add('disabled');
             } else {
                 // Enable all other cases
@@ -6708,10 +6719,8 @@ export class HighlightsSidebarView extends ItemView {
 
         // Disable toolbar buttons except collection nav button
         const toolbarButtons = this.contentEl.querySelectorAll('.highlights-search-container button');
-        toolbarButtons.forEach((button, index) => {
-            const isCollectionNavButton = index === toolbarButtons.length - 1; // Last button
-            
-            if (!isCollectionNavButton) {
+        toolbarButtons.forEach((button) => {
+            if (button !== this.collectionNavButton) {
                 button.classList.add('disabled');
             } else {
                 // Keep collection nav button enabled and styled
