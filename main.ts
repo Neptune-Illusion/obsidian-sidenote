@@ -779,6 +779,8 @@ export default class HighlightCommentsPlugin extends Plugin {
             toolbarEl: HTMLElement | null = null;
             private updateTimeout: number | null = null;
             private destroyed = false;
+            private manuallyClosed = false;
+            private hasManualPosition = false;
             // Set when the user clicks outside the toolbar and editor — keeps
             // the toolbar hidden (despite the still-active selection) until the
             // user actively changes the selection again.
@@ -799,7 +801,11 @@ export default class HighlightCommentsPlugin extends Plugin {
             constructor(private view: any) {}
 
             update(update: any) {
-                if (update.selectionSet) this.dismissed = false;
+                if (update.selectionSet) {
+                    this.dismissed = false;
+                    this.manuallyClosed = false;
+                    this.hasManualPosition = false;
+                }
 
                 // Feature off and nothing visible — don't schedule timers.
                 if (!plugin.settings.enableSelectionToolbar && !this.toolbarEl) return;
@@ -834,12 +840,16 @@ export default class HighlightCommentsPlugin extends Plugin {
 
                 const selection = this.view.state.selection.main;
                 if (!selection || selection.empty || selection.to <= selection.from) {
+                    this.manuallyClosed = false;
+                    this.hasManualPosition = false;
                     this.hideToolbar();
                     return;
                 }
 
                 const selectedText = this.view.state.sliceDoc(selection.from, selection.to);
                 if (!selectedText.trim()) {
+                    this.manuallyClosed = false;
+                    this.hasManualPosition = false;
                     this.hideToolbar();
                     return;
                 }
@@ -847,6 +857,11 @@ export default class HighlightCommentsPlugin extends Plugin {
                 // Dismissed by an outside click — stay hidden until the user
                 // changes the selection (scrolling alone must not resurrect it).
                 if (this.dismissed) {
+                    this.hideToolbar();
+                    return;
+                }
+
+                if (this.manuallyClosed) {
                     this.hideToolbar();
                     return;
                 }
@@ -865,6 +880,13 @@ export default class HighlightCommentsPlugin extends Plugin {
                     this.toolbarEl = document.body.createDiv({ cls: 'sidenote-selection-toolbar' });
                     this.toolbarEl.addEventListener('mousedown', (event) => event.preventDefault());
                     document.addEventListener('pointerdown', this.onDocPointerDown, true);
+                    const dragHandle = this.toolbarEl.createEl('button', {
+                        cls: 'sidenote-toolbar-drag-handle',
+                        attr: { title: 'Move toolbar', 'aria-label': 'Move toolbar' }
+                    });
+                    setIcon(dragHandle, 'grip');
+                    this.enableToolbarDrag(dragHandle);
+
                     const colorInput = this.toolbarEl.createEl('input', {
                         type: 'color',
                         cls: 'sidenote-toolbar-color-picker'
@@ -891,10 +913,79 @@ export default class HighlightCommentsPlugin extends Plugin {
                     this.toolbarEl.createDiv({ cls: 'sidenote-toolbar-divider' });
                     colorInput.remove();
                     this.toolbarEl.appendChild(colorInput);
+
+                    const closeButton = this.toolbarEl.createEl('button', {
+                        cls: 'sidenote-toolbar-close',
+                        attr: { title: 'Close toolbar', 'aria-label': 'Close toolbar' }
+                    });
+                    setIcon(closeButton, 'x');
+                    closeButton.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        this.manuallyClosed = true;
+                        this.hideToolbar();
+                    });
                 }
 
-                this.toolbarEl.style.left = `${Math.max(8, (startCoords.left + endCoords.left) / 2)}px`;
-                this.toolbarEl.style.top = `${Math.max(8, Math.min(startCoords.top, endCoords.top) - 42)}px`;
+                if (!this.hasManualPosition) {
+                    this.positionToolbar(startCoords, endCoords);
+                }
+            }
+
+            private positionToolbar(startCoords: DOMRect, endCoords: DOMRect) {
+                if (!this.toolbarEl) return;
+
+                const rect = this.toolbarEl.getBoundingClientRect();
+                const margin = 8;
+                const width = rect.width;
+                const height = rect.height;
+                const selectionCenter = (startCoords.left + endCoords.left) / 2;
+                const selectionTop = Math.min(startCoords.top, endCoords.top);
+                const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+                const maxTop = Math.max(margin, window.innerHeight - height - margin);
+                const left = Math.min(maxLeft, Math.max(margin, selectionCenter - width / 2));
+                const top = Math.min(maxTop, Math.max(margin, selectionTop - height - 12));
+
+                this.toolbarEl.style.left = `${left}px`;
+                this.toolbarEl.style.top = `${top}px`;
+            }
+
+            private enableToolbarDrag(handleEl: HTMLElement) {
+                handleEl.addEventListener('pointerdown', (event: PointerEvent) => {
+                    if (!this.toolbarEl) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    const rect = this.toolbarEl.getBoundingClientRect();
+                    const startX = event.clientX;
+                    const startY = event.clientY;
+                    const startLeft = rect.left;
+                    const startTop = rect.top;
+                    const width = rect.width;
+                    const height = rect.height;
+
+                    const onMove = (moveEvent: PointerEvent) => {
+                        if (!this.toolbarEl) return;
+                        const margin = 8;
+                        const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+                        const maxTop = Math.max(margin, window.innerHeight - height - margin);
+                        const left = Math.min(maxLeft, Math.max(margin, startLeft + moveEvent.clientX - startX));
+                        const top = Math.min(maxTop, Math.max(margin, startTop + moveEvent.clientY - startY));
+                        this.toolbarEl.style.left = `${left}px`;
+                        this.toolbarEl.style.top = `${top}px`;
+                    };
+
+                    const onUp = () => {
+                        document.removeEventListener('pointermove', onMove);
+                        document.removeEventListener('pointerup', onUp);
+                        document.removeEventListener('pointercancel', onUp);
+                    };
+
+                    this.hasManualPosition = true;
+                    document.addEventListener('pointermove', onMove);
+                    document.addEventListener('pointerup', onUp);
+                    document.addEventListener('pointercancel', onUp);
+                });
             }
 
             hideToolbar() {
