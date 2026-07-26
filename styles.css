@@ -328,13 +328,14 @@
 .highlights-search-container {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-    flex-wrap: wrap;
+    justify-content: space-evenly;
+    flex-wrap: nowrap;
     gap: var(--size-2-1);
-    padding: 8px;
+    padding: 6px 4px;
     border-bottom: 1px solid var(--background-modifier-border);
     flex-shrink: 0;
     background: transparent !important;
+    overflow-x: auto;
 }
 
 .highlights-search-input {
@@ -371,6 +372,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    flex: 1;
+    min-width: 0;
     padding: var(--size-2-2) var(--size-2-3);
     cursor: var(--cursor);
     border-radius: var(--clickable-icon-radius);
