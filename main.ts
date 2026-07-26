@@ -232,6 +232,8 @@ export default class HighlightCommentsPlugin extends Plugin {
     private sidebarView: HighlightsSidebarView | null = null;
     private ribbonIconEl: HTMLElement | null = null;
     private detectHighlightsTimeout: number | null = null;
+    private _saveDebounceTimeout: number | null = null;
+    private _savePending: boolean = false;
     public selectedHighlightId: string | null = null;
     public collectionCommands: Set<string> = new Set(); // Track registered collection commands
     private isScanningFiles: boolean = false; // Prevent concurrent scans
@@ -498,6 +500,21 @@ export default class HighlightCommentsPlugin extends Plugin {
     }
 
     onunload() {
+        // Flush any pending saveSettings before unloading
+        if (this._saveDebounceTimeout || this._savePending) {
+            // Synchronous flush: we can't await in onunload, but saveData()
+            // is fire-and-forget safe — Obsidian handles this during plugin teardown.
+            if (this._saveDebounceTimeout) {
+                window.clearTimeout(this._saveDebounceTimeout);
+                this._saveDebounceTimeout = null;
+            }
+            if (this._savePending) {
+                this._savePending = false;
+                this.settings.highlights = Object.fromEntries(this.highlights);
+                this.settings.collections = Object.fromEntries(this.collections);
+                this.saveData(this.settings); // fire-and-forget
+            }
+        }
         // Remove ribbon icon
         if (this.ribbonIconEl) {
             this.ribbonIconEl.remove();
@@ -596,7 +613,30 @@ export default class HighlightCommentsPlugin extends Plugin {
     }
 
     async saveSettings() {
-        // Save highlights and collections to settings before saving
+        // ponytail: debounce writes — 70 callers, most don't need instant persistence.
+        // onunload() calls flushSaveSettings() to avoid losing pending state.
+        if (this._savePending) {
+            if (this._saveDebounceTimeout) window.clearTimeout(this._saveDebounceTimeout);
+        }
+        this._savePending = true;
+        this._saveDebounceTimeout = window.setTimeout(() => {
+            this._saveDebounceTimeout = null;
+            this.flushSaveSettings();
+        }, 500);
+    }
+
+    /** Force immediate persistence — call from onunload() and critical paths only. */
+    async flushSaveSettings() {
+        if (this._saveDebounceTimeout) {
+            window.clearTimeout(this._saveDebounceTimeout);
+            this._saveDebounceTimeout = null;
+        }
+        if (!this._savePending) return;
+        this._savePending = false;
+        await this._writeSettings();
+    }
+
+    private async _writeSettings() {
         this.settings.highlights = Object.fromEntries(this.highlights);
         this.settings.collections = Object.fromEntries(this.collections);
         await this.saveData(this.settings);
@@ -921,6 +961,8 @@ export default class HighlightCommentsPlugin extends Plugin {
             decorations: DecorationSet;
             private nativeMarkObserver: MutationObserver | null = null;
             private nativeMarkSyncQueued = false;
+            // ponytail: track init-time timeouts so destroy() clears them
+            private _initTimeouts: number[] = [];
 
             constructor(private view: EditorView) {
                 this.decorations = this.buildDecorations();
@@ -928,8 +970,8 @@ export default class HighlightCommentsPlugin extends Plugin {
                 this.nativeMarkObserver = new MutationObserver(() => this.syncNativeMarkStyles());
                 this.nativeMarkObserver.observe(this.view.dom, { childList: true, subtree: true });
                 this.syncNativeMarkStyles();
-                window.setTimeout(() => this.syncNativeMarkStyles(), 50);
-                window.setTimeout(() => this.syncNativeMarkStyles(), 250);
+                this._initTimeouts.push(window.setTimeout(() => this.syncNativeMarkStyles(), 50));
+                this._initTimeouts.push(window.setTimeout(() => this.syncNativeMarkStyles(), 250));
             }
 
             update(update: ViewUpdate) {
@@ -951,6 +993,8 @@ export default class HighlightCommentsPlugin extends Plugin {
             destroy() {
                 this.view.dom.removeEventListener('click', this.handleClick);
                 this.nativeMarkObserver?.disconnect();
+                for (const id of this._initTimeouts) window.clearTimeout(id);
+                this._initTimeouts = [];
             }
 
             private handleClick = (event: MouseEvent) => {
