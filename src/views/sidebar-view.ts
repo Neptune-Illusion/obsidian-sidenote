@@ -12,6 +12,11 @@ import { SimpleSearchManager } from '../managers/simple-search-manager';
 import { STANDARD_FOOTNOTE_REGEX, FOOTNOTE_VALIDATION_REGEX } from '../utils/regex-patterns';
 import { HtmlHighlightParser } from '../utils/html-highlight-parser';
 import { DateSuggest } from '../utils/date-suggest';
+import {
+    matchesMarkTypeFilter,
+    type MarkTypeFilterValue
+} from '../utils/mark-type-filter';
+import { resolveHighlightTags } from '../utils/tag-extraction';
 import { t } from '../i18n';
 
 const VIEW_TYPE_HIGHLIGHTS = 'sidenote-view';
@@ -30,6 +35,7 @@ export class HighlightsSidebarView extends ItemView {
     private selectedTags: Set<string> = new Set();
     private selectedCollections: Set<string> = new Set();
     private selectedSpecialFilters: Set<string> = new Set(); // For task special filters (Flagged, Upcoming, etc.)
+    private selectedMarkTypes: Set<string> = new Set(); // Mark type filters (highlight/underline/strikethrough/bold/comment)
     private selectedHighlightIds: Set<string> = new Set(); // Multi-select for highlights
     private actionsButton: HTMLElement | null = null; // Actions menu button for multi-select
     private collectionNavButton: HTMLElement | null = null; // Collection navigation button
@@ -149,6 +155,8 @@ export class HighlightsSidebarView extends ItemView {
             this.plugin.settings.tabSettings = {};
         }
 
+        // selectedMarkTypes is stored alongside TabSettings without editing main.ts
+        // (TabSettings lives in main.ts and is owned by another teammate).
         this.plugin.settings.tabSettings[this.viewMode] = {
             groupingMode: this.groupingMode,
             sortMode: this.sortMode,
@@ -156,7 +164,10 @@ export class HighlightsSidebarView extends ItemView {
             searchExpanded: this.searchExpanded,
             selectedTags: Array.from(this.selectedTags),
             selectedCollections: Array.from(this.selectedCollections),
-            selectedSpecialFilters: Array.from(this.selectedSpecialFilters)
+            selectedSpecialFilters: Array.from(this.selectedSpecialFilters),
+            selectedMarkTypes: Array.from(this.selectedMarkTypes)
+        } as typeof this.plugin.settings.tabSettings[typeof this.viewMode] & {
+            selectedMarkTypes?: string[];
         };
 
         this.plugin.saveSettings();
@@ -179,6 +190,8 @@ export class HighlightsSidebarView extends ItemView {
             this.selectedTags = new Set(tabSettings.selectedTags || []);
             this.selectedCollections = new Set(tabSettings.selectedCollections || []);
             this.selectedSpecialFilters = new Set(tabSettings.selectedSpecialFilters || []);
+            const savedMarkTypes = (tabSettings as typeof tabSettings & { selectedMarkTypes?: string[] }).selectedMarkTypes;
+            this.selectedMarkTypes = new Set(savedMarkTypes || []);
 
             // Sync highlightCommentsVisible map with commentsExpanded state
             if (this.commentsExpanded) {
@@ -198,6 +211,7 @@ export class HighlightsSidebarView extends ItemView {
             this.selectedTags.clear();
             this.selectedCollections.clear();
             this.selectedSpecialFilters.clear();
+            this.selectedMarkTypes.clear();
 
             // Sync highlightCommentsVisible map with default state (always collapsed)
             this.collapseAllCommentsInMap();
@@ -1111,6 +1125,7 @@ export class HighlightsSidebarView extends ItemView {
         this.highlightCommentsVisible.clear();
         this.selectedTags.clear();
         this.selectedSpecialFilters.clear();
+        this.selectedMarkTypes.clear();
     }
 
     // Navigate to a specific collection (called from command palette)
@@ -1136,6 +1151,7 @@ export class HighlightsSidebarView extends ItemView {
         // Clear any tag filters
         this.selectedTags.clear();
         this.selectedSpecialFilters.clear();
+        this.selectedMarkTypes.clear();
 
         // Render the collection detail view
         this.renderContent();
@@ -1144,6 +1160,7 @@ export class HighlightsSidebarView extends ItemView {
     refresh() {
         this.selectedTags.clear();
         this.selectedSpecialFilters.clear();
+        this.selectedMarkTypes.clear();
         // Invalidate task cache on refresh (settings may have changed)
         this.cachedAllTasks = null;
         // When toolbar setting changes, we need to rebuild the entire view structure
@@ -3435,7 +3452,14 @@ export class HighlightsSidebarView extends ItemView {
         let filteredHighlights = this.applyAllFilters(highlights);
 
         if (filteredHighlights.length === 0) {
-            const message = searchTerm ? t('emptyStates.noMatchingInCollection') : t('emptyStates.noHighlightsInCollection');
+            const hasActiveFilters =
+                !!searchTerm ||
+                this.selectedTags.size > 0 ||
+                this.selectedCollections.size > 0 ||
+                this.selectedMarkTypes.size > 0;
+            const message = hasActiveFilters
+                ? t('emptyStates.noMatchingInCollection')
+                : t('emptyStates.noHighlightsInCollection');
             this.highlightRenderer.createEmptyState(this.listContainerEl, message);
             return;
         }
@@ -3520,16 +3544,23 @@ export class HighlightsSidebarView extends ItemView {
         let filteredHighlights = this.applyAllFilters(allHighlights);
 
         if (filteredHighlights.length === 0) {
+            const hasActiveFilters =
+                !!searchTerm ||
+                this.selectedTags.size > 0 ||
+                this.selectedCollections.size > 0 ||
+                this.selectedMarkTypes.size > 0;
             let message: string;
             if (this.viewMode === 'current') {
                 const file = this.plugin.app.workspace.getActiveFile();
                 if (file && file.extension === 'pdf') {
                     message = t('emptyStates.pdfNotSupported');
                 } else {
-                    message = searchTerm ? t('emptyStates.noMatching') : t('emptyStates.noHighlightsInFile');
+                    message = hasActiveFilters ? t('emptyStates.noMatching') : t('emptyStates.noHighlightsInFile');
                 }
             } else {
-                message = searchTerm ? t('emptyStates.noMatchingAcrossAll') : t('emptyStates.noHighlightsAcrossAll');
+                message = hasActiveFilters
+                    ? t('emptyStates.noMatchingAcrossAll')
+                    : t('emptyStates.noHighlightsAcrossAll');
             }
             this.highlightRenderer.createEmptyState(this.listContainerEl, message);
         } else {
@@ -6165,27 +6196,9 @@ export class HighlightsSidebarView extends ItemView {
     }
 
     private extractTagsFromHighlight(highlight: Highlight): string[] {
-        const tags: string[] = [];
-        
-        if (highlight.footnoteContents) {
-            // Process footnotes in order and collect tags
-            for (const content of highlight.footnoteContents) {
-                if (content.trim() !== '') {
-                    // Extract hashtags from footnote content (including unicode characters and nested paths)
-                    const tagMatches = content.match(/#[\p{L}\p{N}\p{M}_/-]+/gu);
-                    if (tagMatches) {
-                        tagMatches.forEach(tag => {
-                            const tagName = tag.substring(1); // Remove the # symbol
-                            if (!tags.includes(tagName)) {
-                                tags.push(tagName);
-                            }
-                        });
-                    }
-                }
-            }
-        }
-        
-        return tags; // Return in order found, first tag will be at index 0
+        // Prefer persisted tags (filled at scan time); fall back to live
+        // extraction from text + footnotes for legacy empty-tags data.
+        return resolveHighlightTags(highlight);
     }
 
     private getAllTagsInFile(): string[] {
@@ -6346,8 +6359,16 @@ export class HighlightsSidebarView extends ItemView {
         const availableCollections = this.getAllCollectionsInCurrentScope();
         const availableSpecialFilters = this.getAvailableSpecialFilters();
         const noteDateFilters = this.viewMode === 'tasks' ? this.getNoteDateFilters() : [];
+        // Mark-type filters apply to highlight views only (not the tasks tab).
+        const showMarkTypeFilters = this.viewMode !== 'tasks';
 
-        if (availableTags.length === 0 && availableCollections.length === 0 && availableSpecialFilters.length === 0 && noteDateFilters.length === 0) {
+        if (
+            availableTags.length === 0 &&
+            availableCollections.length === 0 &&
+            availableSpecialFilters.length === 0 &&
+            noteDateFilters.length === 0 &&
+            !showMarkTypeFilters
+        ) {
             new Notice(t('emptyStates.noTagsOrFilters'));
             return;
         }
@@ -6366,6 +6387,7 @@ export class HighlightsSidebarView extends ItemView {
                     this.selectedTags.clear();
                     this.selectedCollections.clear();
                     this.selectedSpecialFilters.clear();
+                    this.selectedMarkTypes.clear();
                     this.saveCurrentTabSettings();
                     this.renderContent();
                     this.showTagActive();
@@ -6455,6 +6477,42 @@ export class HighlightsSidebarView extends ItemView {
                             this.selectedSpecialFilters.delete(filter.id);
                         } else {
                             this.selectedSpecialFilters.add(filter.id);
+                        }
+                        this.saveCurrentTabSettings();
+                        this.renderContent();
+                        this.showTagActive();
+                    }
+                }))
+            });
+        }
+
+        // Add Mark Types category (highlight views only) — always available so
+        // users can filter even when no tags/collections exist in the note.
+        if (showMarkTypeFilters) {
+            const markTypeMeta: Array<{ id: MarkTypeFilterValue; labelKey: string; icon: string }> = [
+                { id: 'highlight', labelKey: 'filterMenu.markHighlight', icon: 'highlighter' },
+                { id: 'underline', labelKey: 'filterMenu.markUnderline', icon: 'underline' },
+                { id: 'strikethrough', labelKey: 'filterMenu.markStrikethrough', icon: 'strikethrough' },
+                { id: 'bold', labelKey: 'filterMenu.markBold', icon: 'bold' },
+                { id: 'comment', labelKey: 'filterMenu.markNativeComment', icon: 'captions' }
+            ];
+
+            items.push({
+                id: 'category-mark-types',
+                text: t('filterMenu.markTypes'),
+                icon: 'highlighter',
+                expandable: true,
+                expanded: this.selectedMarkTypes.size > 0,
+                children: markTypeMeta.map(meta => ({
+                    id: `mark-type-${meta.id}`,
+                    text: t(meta.labelKey),
+                    uncheckedIcon: meta.icon,
+                    checked: this.selectedMarkTypes.has(meta.id),
+                    onClick: () => {
+                        if (this.selectedMarkTypes.has(meta.id)) {
+                            this.selectedMarkTypes.delete(meta.id);
+                        } else {
+                            this.selectedMarkTypes.add(meta.id);
                         }
                         this.saveCurrentTabSettings();
                         this.renderContent();
@@ -6753,7 +6811,12 @@ export class HighlightsSidebarView extends ItemView {
 
         const tagFilterButton = this.contentEl.querySelector('.highlights-tag-filter-button') as HTMLElement;
         if (tagFilterButton) {
-            if (this.selectedTags.size > 0 || this.selectedCollections.size > 0 || this.selectedSpecialFilters.size > 0) {
+            if (
+                this.selectedTags.size > 0 ||
+                this.selectedCollections.size > 0 ||
+                this.selectedSpecialFilters.size > 0 ||
+                this.selectedMarkTypes.size > 0
+            ) {
                 tagFilterButton.classList.add('active');
             } else {
                 tagFilterButton.classList.remove('active');
@@ -7409,6 +7472,11 @@ export class HighlightsSidebarView extends ItemView {
                     highlightCollections.some(collection => collection.name === selectedCollection)
                 );
                 if (!collectionFilterMatch) return false;
+            }
+
+            // 3b. Apply mark-type filter (OR within types, AND with tags/collections)
+            if (!matchesMarkTypeFilter(highlight, this.selectedMarkTypes)) {
+                return false;
             }
 
             // 4. Apply native comments filtering

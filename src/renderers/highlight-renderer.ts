@@ -1,6 +1,7 @@
 import { setIcon, TFile, Menu, Notice, moment } from 'obsidian';
 import type { Highlight } from '../../main';
 import type HighlightCommentsPlugin from '../../main';
+import { resolveHighlightTags } from '../utils/tag-extraction';
 
 export interface HighlightRenderOptions {
     searchTerm?: string;
@@ -729,25 +730,8 @@ export class HighlightRenderer {
     }
 
     private extractTagsFromHighlight(highlight: Highlight): string[] {
-        const tags: string[] = [];
-        
-        if (highlight.footnoteContents) {
-            for (const content of highlight.footnoteContents) {
-                if (content.trim() !== '') {
-                    const tagMatches = content.match(/#[\p{L}\p{N}\p{M}_/-]+/gu);
-                    if (tagMatches) {
-                        tagMatches.forEach(tag => {
-                            const tagName = tag.substring(1);
-                            if (!tags.includes(tagName)) {
-                                tags.push(tagName);
-                            }
-                        });
-                    }
-                }
-            }
-        }
-        
-        return tags;
+        // Prefer persisted tags; fall back to live extraction for legacy data.
+        return resolveHighlightTags(highlight);
     }
 
     private isColorChangeable(highlight: Highlight): boolean {

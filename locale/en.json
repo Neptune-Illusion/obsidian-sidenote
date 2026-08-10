@@ -248,6 +248,8 @@
     "revertColors": "Revert highlight colors",
     "filter": "Filter",
     "actions": "Actions",
+    "clearSelection": "Clear sidenotes in selection",
+    "noHighlightsInSelection": "No sidenotes found in selection",
     "backToCollections": "Back to Collections",
     "newCollection": "New collection",
     "closeSearch": "Close search"
@@ -335,7 +337,13 @@
     "noteCreated": "Note Created",
     "last7Days": "Last 7 days",
     "last30Days": "Last 30 days",
-    "lastYear": "Last year"
+    "lastYear": "Last year",
+    "markTypes": "Mark Types",
+    "markHighlight": "Highlight",
+    "markUnderline": "Underline",
+    "markStrikethrough": "Strikethrough",
+    "markBold": "Bold",
+    "markNativeComment": "Native comment (%%…%%)"
   },
   "dateSuggestions": {
     "today": "Today",

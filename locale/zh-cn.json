@@ -233,6 +233,8 @@
     "revertColors": "还原高亮颜色",
     "filter": "过滤",
     "actions": "操作",
+    "clearSelection": "清除选区中的边注",
+    "noHighlightsInSelection": "选区中没有边注",
     "backToCollections": "返回合集",
     "newCollection": "新建合集",
     "closeSearch": "关闭搜索"
@@ -320,7 +322,13 @@
     "noteCreated": "笔记创建",
     "last7Days": "最近7天",
     "last30Days": "最近30天",
-    "lastYear": "最近一年"
+    "lastYear": "最近一年",
+    "markTypes": "标记类型",
+    "markHighlight": "高亮",
+    "markUnderline": "下划线",
+    "markStrikethrough": "删除线",
+    "markBold": "粗体",
+    "markNativeComment": "原生注释 (%%…%%)"
   },
   "dateSuggestions": {
     "today": "今天",

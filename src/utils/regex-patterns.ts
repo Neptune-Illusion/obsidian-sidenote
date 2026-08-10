@@ -6,7 +6,7 @@
  * Matches standard footnote references like [^1] or [^key]
  * Uses negative lookahead (?!:) to avoid matching footnote definitions [^key]: content
  */
-export const STANDARD_FOOTNOTE_REGEX = /(\s*\[\^(\w+)\])(?!:)/g;
+export const STANDARD_FOOTNOTE_REGEX = /(\s*\[\^([a-zA-Z0-9_-]+)\])(?!:)/g;
 
 /**
  * Validates that a text segment contains only footnote references (standard or inline)

@@ -456,7 +456,7 @@ export class InlineFootnoteManager {
 
     private getNextStandardFootnoteKey(content: string): string {
         const usedKeys = new Set<string>();
-        const footnoteRegex = /\[\^([a-zA-Z0-9_]+)\]/g;
+        const footnoteRegex = /\[\^([a-zA-Z0-9_-]+)\]/g;
         let match;
 
         while ((match = footnoteRegex.exec(content)) !== null) {
